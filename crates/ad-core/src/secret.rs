@@ -163,6 +163,58 @@ impl From<&str> for Tajne {
     }
 }
 
+/// Vytáhne z PEM textu všechny bloky daného typu jako DER.
+///
+/// Píšeme si to sami, abychom nepotřebovali další knihovnu na dvacet
+/// řádků práce. PEM je jen base64 mezi `-----BEGIN X-----`
+/// a `-----END X-----`.
+pub fn pem_bloky(pem: &str, tag: &str) -> Result<Vec<Vec<u8>>> {
+    let zacatek = format!("-----BEGIN {tag}-----");
+    let konec = format!("-----END {tag}-----");
+    let mut vysledek = Vec::new();
+    let mut uvnitr = false;
+    let mut base64_text = String::new();
+
+    for radek in pem.lines() {
+        let r = radek.trim();
+        if r == zacatek {
+            if uvnitr {
+                return Err(AdError::bad_request("PEM: druhý BEGIN před END"));
+            }
+            uvnitr = true;
+            base64_text.clear();
+        } else if r == konec {
+            if !uvnitr {
+                return Err(AdError::bad_request("PEM: END bez BEGIN"));
+            }
+            uvnitr = false;
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(base64_text.as_bytes())
+                .map_err(|_| AdError::bad_request("PEM: obsah není platné base64"))?;
+            vysledek.push(der);
+        } else if uvnitr {
+            base64_text.push_str(r);
+        }
+    }
+    if uvnitr {
+        return Err(AdError::bad_request("PEM: chybí END"));
+    }
+    if vysledek.is_empty() {
+        return Err(AdError::bad_request(format!("PEM neobsahuje blok {tag}")));
+    }
+    Ok(vysledek)
+}
+
+/// První blok daného typu z PEM.
+pub fn der_z_pem(pem: &str, tag: &str) -> Result<Vec<u8>> {
+    Ok(pem_bloky(pem, tag)?.swap_remove(0))
+}
+
+/// Otisk certifikátu zapsaného v PEM.
+pub fn otisk_z_pem(pem: &str) -> Result<String> {
+    Ok(otisk_certifikatu(&der_z_pem(pem, "CERTIFICATE")?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +313,41 @@ mod tests {
         let vypis = format!("{p:?}");
         assert!(vypis.contains("jan"));
         assert!(!vypis.contains("Tajne1!"));
+    }
+
+    #[test]
+    fn pem_se_rozparsuje() {
+        let pem = "\
+hlavicka, kterou ignorujeme
+-----BEGIN CERTIFICATE-----
+YWJj
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+ZGVm
+-----END CERTIFICATE-----
+";
+        let b = pem_bloky(pem, "CERTIFICATE").unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0], b"abc");
+        assert_eq!(b[1], b"def");
+        assert_eq!(der_z_pem(pem, "CERTIFICATE").unwrap(), b"abc");
+        assert_eq!(otisk_z_pem(pem).unwrap(), otisk_certifikatu(b"abc"));
+    }
+
+    #[test]
+    fn rozbity_pem_je_chyba() {
+        assert!(pem_bloky("-----BEGIN CERTIFICATE-----\nYWJj\n", "CERTIFICATE").is_err());
+        assert!(pem_bloky("nic", "CERTIFICATE").is_err());
+        assert!(pem_bloky(
+            "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----",
+            "CERTIFICATE"
+        )
+        .is_err());
+        // Hledáme jiný tag, než jaký tam je.
+        assert!(pem_bloky(
+            "-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----",
+            "PRIVATE KEY"
+        )
+        .is_err());
     }
 }

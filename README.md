@@ -11,8 +11,8 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 
 | Fáze | Co | Stav |
 |---|---|---|
-| **1** | architektura, protokol, sdílené jádro `ad-core` | **hotovo, k otestování** |
-| 2 | server: SQLite, doména, uživatelé, přihlášení, TLS | čeká |
+| 1 | architektura, protokol, sdílené jádro `ad-core` | hotovo |
+| **2** | server: SQLite, doména, uživatelé, přihlášení, TLS | **hotovo, k otestování** |
 | 3 | webová správa (dashboard, průvodci, nástroje) | čeká |
 | 4 | vlastní DNS server | čeká |
 | 5 | klient a zásady | čeká |
@@ -45,9 +45,15 @@ crates/
     src/secret.rs          tokeny, otisky certifikátů, typ Tajne
     src/dns.rs             model zón a záznamů
     src/proto.rs           protokol AD-PROTO/1
-  ad-server/               řadič domény (fáze 2+)
+  ad-server/               řadič domény
+    src/config.rs          konfigurace a cesty k datům
+    src/pki.rs             vlastní CA a certifikát serveru (rcgen)
+    src/domain.rs          kontrola předpokladů, povýšení, zrušení domény
+    src/store/             SQLite: schéma, objekty, přihlašování, zásady, DNS
+    src/http/              axum: správní API, doménové API, CSRF, chyby
   ad-client/               klient (fáze 5)
 docs/
+  test-faze2.sh            automatický test fáze 2 na jednom stroji
 ```
 
 Proč jedno sdílené jádro: kdyby měl server a klient každý svoji kopii
@@ -90,6 +96,75 @@ target/x86_64-pc-windows-gnu/release/ad-client.exe
 
 Linuxové verze jsou staticky slinkované (`static-pie`), takže běží na
 Debianu i na Void Linuxu bez instalace knihoven.
+
+## Test fáze 2
+
+Celá fáze 2 se dá otestovat na jednom stroji, bez virtuálky:
+
+```bash
+cargo build -p ad-server
+bash docs/test-faze2.sh
+```
+
+Skript projde celý postup a hlásí každý krok: start serveru, jednorázový
+token, CSRF, přidání rolí, kontrolu předpokladů, povýšení na řadič domény,
+vytvoření OU a uživatelů, TLS, připojení počítače, přihlášení uživatele,
+zamčení účtu, zásady, restart serveru a zrušení domény. Kontroluje i to,
+co se **nemá** stát — třeba že v logu ani v databázi není žádné heslo.
+
+### Ručně, krok za krokem
+
+```bash
+# 1. server (datový adresář v projektu, ať se nic nesype do /var)
+cargo run -p ad-server -- --data-dir ./data run
+
+# vypíše jednorázový token, např.:
+#   PRVNÍ SPUŠTĚNÍ — jednorázový token pro přihlášení do správy
+#     Xy7...
+
+# 2. přihlášení tím tokenem
+TOKEN=$(cat data/setup-token.txt)
+ODP=$(curl -s -c c.txt -X POST http://127.0.0.1:8080/admin/api/v1/session \
+  -H 'content-type: application/json' \
+  -d "{\"method\":\"setup_token\",\"token\":\"$TOKEN\"}")
+CSRF=$(echo "$ODP" | jq -r .csrf_token)
+
+# 3. přehled — uvidíš upozornění "Přidat role a funkce"
+curl -s -b c.txt http://127.0.0.1:8080/admin/api/v1/status | jq
+
+# 4. role
+curl -s -b c.txt -X POST http://127.0.0.1:8080/admin/api/v1/roles \
+  -H "x-ad-csrf: $CSRF" -H 'content-type: application/json' \
+  -d '{"directory":true,"dns":true,"consent":true}' | jq
+
+# 5. kontrola předpokladů (vypíše pass/warn/fail ke každé položce)
+POV='{"domain_dns_name":"skola.internal","dc_hostname":"DC01",
+  "dc_ip":"127.0.0.1","administrator_password":"Spravce-Heslo1",
+  "dns":{"create_reverse":true,"reverse_prefix":24,
+  "forwarders":["1.1.1.1"],"enable_server":false},"confirm":true}'
+curl -s -b c.txt -X POST http://127.0.0.1:8080/admin/api/v1/promote/precheck \
+  -H "x-ad-csrf: $CSRF" -H 'content-type: application/json' -d "$POV" | jq
+
+# 6. vytvoření domény
+curl -s -b c.txt -X POST http://127.0.0.1:8080/admin/api/v1/promote \
+  -H "x-ad-csrf: $CSRF" -H 'content-type: application/json' -d "$POV" | jq
+
+# 7. doménové API přes TLS, s ověřeným certifikátem naší CA
+curl -s --cacert data/pki/ca.pem --resolve dc01.skola.internal:8443:127.0.0.1 \
+  https://dc01.skola.internal:8443/api/v1/hello | jq
+```
+
+Co stojí za to zkusit naschvál špatně:
+
+| Zkus | Očekávaná odpověď |
+|---|---|
+| POST bez hlavičky `x-ad-csrf` | `403 csrf_failed` |
+| doména `skola.local` | kontrola skončí `fail` |
+| heslo `heslo` u nového uživatele | `400 password_policy_violation` se seznamem porušených pravidel |
+| zásada s polem `"run_command"` | `400 bad_request` — neznámé pole |
+| 5× špatné heslo | `403 account_locked` |
+| `jan.novak` připojuje počítač | `403 permission_denied` |
+| správa z vnější IP adresy | spojení se vůbec nenaváže |
 
 ## Test fáze 1
 

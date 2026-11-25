@@ -102,6 +102,11 @@ S `tls = true` se použije stejný certifikát jako pro doménové API, tedy
 podepsaný naší CA. Prohlížeč na varování upozorní, dokud do něj
 nenaimportuješ `ca.pem` — to je očekávané, ne chyba.
 
+Pozor na pořadí: certifikát vzniká až při vytvoření domény. Se
+`tls = true` na čistém serveru by nebylo čím šifrovat, takže server
+odmítne nastartovat a řekne to. Postup je: vytvoř doménu s `tls = false`,
+pak přepni na `true` a restartuj.
+
 ## 4. Kde co leží
 
 | | Windows | Debian / Void |
@@ -181,6 +186,18 @@ Hesla a tajemství jsou **jen** v `users.password_hash`,
 `password_history` a `computers.secret_hash`. Žádný dotaz, který vrací
 objekt do API, se jich nedotýká — struktury v `ad-core::model` je ani
 neumí reprezentovat.
+
+### Jedno spojení za mutexem
+
+`Store` drží jedno spojení k SQLite za `Mutex`. Metody jsou synchronní
+a HTTP vrstva je volá přes `tokio::task::spawn_blocking`, aby neblokovaly
+asynchronní vlákna (Argon2id trvá desítky milisekund, to by se poznalo).
+
+Mutex **není** reentrantní, takže metoda, která drží zámek, nesmí zavolat
+jinou metodu `Store`. Přesně na tom se povyšování domény ve fázi 2
+zaseklo. Teď to hlídá vlákno samo: druhé zamknutí skončí panikou
+s vysvětlením (`store/mod.rs`, test `vnorene_zamknuti_spadne_misto_zaseknuti`).
+Panika se dá najít a opravit, zaseknutý server ne.
 
 ## 6. TLS a vlastní certifikační autorita
 
@@ -290,8 +307,8 @@ musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
 
 | Fáze | Obsah | Test |
 |---|---|---|
-| **1** | architektura, protokol, `ad-core` | `cargo test`, `--version`, oba cíle |
-| 2 | SQLite, povýšení, uživatelé, přihlášení, TLS | `curl` proti API |
+| 1 | architektura, protokol, `ad-core` | `cargo test`, `--version`, oba cíle |
+| **2** | SQLite, povýšení, uživatelé, přihlášení, TLS | `bash docs/test-faze2.sh` |
 | 3 | webová správa (dashboard, průvodci, nástroje) | prohlížeč na 127.0.0.1 |
 | 4 | DNS server, zóny, forwarder | `dig @server`, `nslookup` |
 | 5 | klient: join, logon, zásady, leave | dvě virtuálky |

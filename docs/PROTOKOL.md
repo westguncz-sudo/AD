@@ -120,7 +120,7 @@ nedá zjistit, která jména v doméně existují.
 | POST | `/unjoin` | token počítače | odpojí počítač, uklidí DNS |
 | POST | `/machine/token` | tajemství počítače | vydá krátkodobý token |
 | GET | `/machine/policy` | token počítače | zásady pro počítač |
-| GET | `/machine/asset/{id}` | token počítače | stáhne tapetu |
+| GET | `/machine/asset/{id}` | token počítače | stáhne tapetu (fáze 5) |
 | POST | `/auth/logon` | token počítače | přihlásí uživatele, vrátí zásady |
 | POST | `/auth/change-password` | token počítače | změna hesla uživatelem |
 | POST | `/auth/logoff` | ticket uživatele | zneplatní ticket |
@@ -344,7 +344,23 @@ Audit zapisuje: čas, strojovou akci (`user.create`, `auth.logon.failed`),
 kdo (`SKOLA\administrator`, `machine:PC-01`, `setup-token`), čeho se to
 týkalo, IP a výsledek.
 
-## 6. Příklady na vyzkoušení (fáze 2 a dál)
+## 6. Co už funguje
+
+Stav po fázi 2 — co je hotové a co ještě ne:
+
+| Část | Stav |
+|---|---|
+| `/hello`, `/join`, `/unjoin`, `/machine/token` | hotovo |
+| `/auth/logon`, `/auth/change-password`, `/auth/logoff` | hotovo |
+| `/machine/policy` (včetně `If-None-Match`), `/heartbeat` | hotovo |
+| `/machine/asset/{id}` (tapeta) | fáze 5 |
+| správní API: session, status, roles, promote, demote, audit | hotovo |
+| správní API: OU, uživatelé, skupiny, počítače, zásady, DNS data | hotovo |
+| nahrání tapety (`POST /assets`) | fáze 5 |
+| webové rozhraní nad tím | fáze 3 |
+| vlastní DNS server na portu 53 | fáze 4 |
+
+## 7. Příklady na vyzkoušení
 
 ```bash
 # základní informace o serveru, bez přihlášení
