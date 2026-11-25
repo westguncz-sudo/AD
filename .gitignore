@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+/dist
+/data
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.key
+setup-token.txt
