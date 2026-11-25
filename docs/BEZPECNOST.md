@@ -128,6 +128,11 @@ Nejlepší ochrana rozhraní je, že tam zvenčí nic neposlouchá. Pro
 vzdálenou správu se používá SSH tunel — šifrování a autentizaci řeší
 SSH, které je na to napsané lépe než my.
 
+TLS se tam dá zapnout (`[admin] tls = true`) a při vazbě na jinou než
+loopback adresu je **povinné** — server s `tls = false` na `0.0.0.0`
+odmítne nastartovat, aby heslo správce nemohlo omylem letět sítí
+v čistém textu.
+
 I tak má správní API přihlášení a CSRF: na serveru může být víc
 uživatelů a chyba v prohlížeči se stává.
 

@@ -64,7 +64,7 @@ společný stav bez meziprocesové komunikace.
 
 | Název | Adresa | TLS | Kdo s tím mluví |
 |---|---|---|---|
-| `admin` | `127.0.0.1:8080` | ne (viz níže) | prohlížeč správce |
+| `admin` | `127.0.0.1:8080` | volitelné (viz níže) | prohlížeč správce |
 | `domain-api` | `0.0.0.0:8443` | **ano** | `ad-client` |
 | `dns-udp`, `dns-tcp` | `0.0.0.0:53` | — | kdokoli v síti |
 
@@ -73,21 +73,34 @@ poslouchátkách.** Z vnější sítě se na správu nedá dosáhnout vůbec —
 proto, že by to router zakázal, ale protože tam neposlouchá. To je
 nejsilnější druh izolace.
 
-### Rozhodnutí k potvrzení: TLS na správním rozhraní
+### TLS na správním rozhraní: obojí, s pojistkou
 
-Zadání říká „komunikace přes TLS“. Klient–server TLS má vždy. U správy
-navrhuji **výchozí stav bez TLS, ale jen na `127.0.0.1`**:
+Zadání říká „komunikace přes TLS“. Klient–server TLS má vždy, bez
+výjimky. U správního rozhraní se dá vybrat:
 
-- provoz nikdy neopustí počítač, odposlouchávat se dá jen z toho stroje
+```toml
+[admin]
+bind = "127.0.0.1:8080"   # kde poslouchá správa
+tls  = false              # true = HTTPS se stejným certifikátem jako doménové API
+```
+
+**Pojistka:** když `bind` není loopback (`127.0.0.1` nebo `::1`), je
+`tls = true` povinné a server s `false` odmítne nastartovat. Důvod: na
+loopbacku provoz nikdy neopustí počítač, ale na `0.0.0.0` by heslo
+správce letělo sítí v čistém textu. Takhle si můžeš přepnout, co
+potřebuješ, ale nedá se omylem vystavit nechráněná správa.
+
+**Výchozí stav** je `127.0.0.1:8080` a `tls = false`, protože:
+
+- provoz neopustí počítač, odposlechnout se dá jen z toho stroje
 - vzdáleně se k tomu dostaneš SSH tunelem, kde šifruje SSH
   (`ssh -L 8080:127.0.0.1:8080 uzivatel@server`)
 - prohlížeč nehlásí varování o nedůvěryhodném certifikátu, takže to
   v obhajobě neruší
 
-V konfiguraci bude `[admin] tls = false`. Přepnutím na `true` se použije
-stejný certifikát jako pro doménové API. **Když chceš TLS i tady jako
-výchozí, řekni a změním to** — je to jedna položka v konfiguraci, ne
-přestavba.
+S `tls = true` se použije stejný certifikát jako pro doménové API, tedy
+podepsaný naší CA. Prohlížeč na varování upozorní, dokud do něj
+nenaimportuješ `ca.pem` — to je očekávané, ne chyba.
 
 ## 4. Kde co leží
 
