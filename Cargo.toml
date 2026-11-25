@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/ad-core", "crates/ad-server", "crates/ad-client"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["skolni projekt"]
+repository = "https://github.com/westguncz-sudo/ad"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
