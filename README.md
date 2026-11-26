@@ -23,6 +23,7 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 
 | Soubor | Co v něm je |
 |---|---|
+| [`docs/INSTALACE.md`](docs/INSTALACE.md) | **návod krok za krokem**: server, klient, ověření, odinstalace, řešení potíží |
 | [`docs/ARCHITEKTURA.md`](docs/ARCHITEKTURA.md) | komponenty, porty, databáze, DNS, cesta zásad, služby |
 | [`docs/PROTOKOL.md`](docs/PROTOKOL.md) | AD-PROTO/1: koncové body, autentizace, chyby, příklady |
 | [`docs/BEZPECNOST.md`](docs/BEZPECNOST.md) | model hrozeb, rozhodnutí a jejich důvody, známé slabiny |
