@@ -85,8 +85,8 @@ ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
 | 3 | `bash docs/test-faze3.sh`, nebo ručně v prohlížeči: přehled → role → povýšení → nástroje |
 | 4 | `bash docs/test-faze4.sh`, nebo z klientské virtuálky: `dig @192.168.56.10 dc01.skola.internal`, `dig @192.168.56.10 -x 192.168.56.10`, `dig @192.168.56.10 _ad._tcp.skola.internal SRV`, `dig @192.168.56.10 seznam.cz` |
 | 5 | `bash docs/test-faze5.sh` na jednom stroji; ve virtuálkách `ad-client join` na obou klientech, přihlášení uživatele, změna zásady a její dopad, `ad-client leave` a kontrola, že `/etc/resolv.conf` je zpátky |
-| 6 | restart virtuálky — služba se spustí sama; `systemctl status`, `sv status`, `Get-Service` |
-| 7 | stáhnout z `index.html`, ověřit SHA-256, spustit |
+| 6 | `sudo bash docs/test-faze6.sh --opravdu`, pak restart virtuálky — služba se spustí sama (`systemctl status ad-server`, `sv status ad-server`, `sc query ADServer`) |
+| 7 | `bash scripts/sestav-vydani.sh`, otevřít `dist/index.html`, stáhnout, ověřit SHA-256 (`sha256sum -c SHA256SUMS`) a spustit |
 
 ## Užitečné při ladění
 
@@ -103,10 +103,10 @@ sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/ad-server
 
 # sleduj log serveru
 sudo journalctl -u ad-server -f          # Debian
-sudo tail -f /var/log/ad-server/current  # Void (svlogd)
+sudo tail -f /var/lib/ad-server/logs/current  # Void (svlogd)
 
 # zkontroluj, že v logu není heslo (nahraď svým testovacím heslem)
-sudo grep -ri 'Tajne1' /var/log/ad-server/ ; echo "nic nalezeno = dobře"
+sudo grep -ri 'Tajne1' /var/lib/ad-server/logs/ ; echo "nic nalezeno = dobře"
 
 # databáze ručně
 sqlite3 /var/lib/ad-server/domain.db '.tables'

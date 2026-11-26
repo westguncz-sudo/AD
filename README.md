@@ -15,9 +15,9 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 | 2 | server: SQLite, doména, uživatelé, přihlášení, TLS | hotovo |
 | 3 | webová správa (dashboard, průvodci, nástroje) | hotovo |
 | 4 | vlastní DNS server | hotovo |
-| **5** | klient a zásady | **hotovo, k otestování** |
-| 6 | služby: Windows Service, systemd, runit | čeká |
-| 7 | `index.html`, SHA-256, GitHub Actions | čeká |
+| 5 | klient a zásady | hotovo |
+| **6** | služby: Windows Service, systemd, runit | **hotovo, k otestování** |
+| **7** | `index.html`, SHA-256, GitHub Actions | **hotovo, k otestování** |
 
 ## Dokumentace
 
@@ -49,6 +49,7 @@ crates/
     src/config.rs          konfigurace a cesty k datům
     src/pki.rs             vlastní CA a certifikát serveru (rcgen)
     src/domain.rs          kontrola předpokladů, povýšení, zrušení domény
+    src/sluzba.rs          instalace služby: systemd, runit, Windows Service
     src/dns/               vlastní DNS server (hickory-proto jen na pakety)
       odpoved.rs           sestavení odpovědi ze zón — bez sítě, plně testovatelné
       forward.rs           přeposílání dál + krátká paměť na odpovědi
@@ -74,6 +75,13 @@ docs/
   test-faze3.sh            automatický test rozhraní v prohlížeči (76 kontrol)
   test-faze4.sh            automatický test DNS serveru přes dig (41 kontrol)
   test-faze5.sh            automatický test klienta a zásad (65 kontrol)
+  test-faze6.sh            test instalace služby (nanečisto i doopravdy)
+scripts/
+  sestav-vydani.sh         přeloží všechny čtyři binárky a vyrobí index.html
+dist/
+  index.template.html      šablona stránky ke stažení
+.github/workflows/
+  sestaveni.yml            kontroly, testy, sestavení a vydání
 ```
 
 Proč jedno sdílené jádro: kdyby měl server a klient každý svoji kopii
@@ -116,6 +124,79 @@ target/x86_64-pc-windows-gnu/release/ad-client.exe
 
 Linuxové verze jsou staticky slinkované (`static-pie`), takže běží na
 Debianu i na Void Linuxu bez instalace knihoven.
+
+## Test fází 6 a 7
+
+### Fáze 6 — služba
+
+```bash
+# nanečisto: jen ukáže, co by instalace udělala
+bash docs/test-faze6.sh
+
+# doopravdy: nainstaluje službu, ověří ji a zase ji odebere
+sudo bash docs/test-faze6.sh --opravdu
+```
+
+Ručně:
+
+```bash
+sudo cp target/release/ad-server /usr/local/bin/
+sudo ad-server install-service            # jen vypíše, co udělá
+sudo ad-server install-service --yes      # teprve tohle to udělá
+sudo ad-server service-status
+sudo ad-server uninstall-service --yes    # a takhle zase pryč
+```
+
+Na Windows totéž v příkazovém řádku jako správce.
+
+Co za tím je:
+
+| Systém | Co vznikne |
+|---|---|
+| Debian a jiné se systemd | `/etc/systemd/system/ad-server.service` |
+| Void Linux | `/etc/sv/ad-server/run` a `log/run`, odkaz ve `/var/service` |
+| Windows | služba `ADServer` ve správci služeb |
+
+Na Linuxu server **neběží pod rootem**. Port 53 je pod 1024, ale místo
+práv roota dostane služba jen schopnost `CAP_NET_BIND_SERVICE`
+(systemd přes `AmbientCapabilities`, runit přes `setcap` na binárce).
+Jednotka systemd navíc zakazuje zápis mimo vlastní adresáře
+(`ProtectSystem=strict`).
+
+### Fáze 7 — sestavení a stránka ke stažení
+
+```bash
+bash scripts/sestav-vydani.sh
+# výsledek: dist/index.html + čtyři binárky + SHA256SUMS
+```
+
+Skript sám zkontroluje, že linuxové binárky jsou staticky slinkované
+(jinak by na Void nenaběhly) a že `.exe` nepotřebují přibalenou
+knihovnu z mingw. Když ne, skončí chybou — tohle se nemá zjistit až
+u uživatele.
+
+Stránku si prohlédni v prohlížeči: `dist/index.html`. Odkazy míří na
+soubory vedle ní; při vydání se přepíšou na adresy z GitHub Releases.
+
+**GitHub Actions** (`.github/workflows/sestaveni.yml`) dělá při každém
+pushi tohle:
+
+| Úloha | Co dělá |
+|---|---|
+| `kontrola` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, eslint |
+| `testy-nanecisto` | spustí testy fází 2 až 6 a uloží snímky obrazovky |
+| `sestaveni` | přeloží všechny čtyři binárky a vyrobí `index.html` |
+| `vydani` | jen pro značku `v*` — vytvoří vydání se soubory a součty |
+
+Vydat novou verzi:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Všechno se překládá na Linuxu — Windows binárky křížově přes mingw.
+Ověřili jsme, že výsledná `.exe` nepotřebují žádnou přibalenou DLL,
+takže se tím nic neztrácí a sestavení běží v jednom prostředí.
 
 ## Test fáze 5
 

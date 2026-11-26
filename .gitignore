@@ -12,3 +12,8 @@ data-test-ui/
 data-test/
 data-test-dns/
 data-test-klient/
+data-test-sluzba/
+dist/soubory/
+dist/ad-*
+dist/SHA256SUMS
+dist/index.html

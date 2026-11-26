@@ -233,14 +233,31 @@ jsou zastropované všude: jména, popisy, heslo (256 bajtů), tapeta
 Jméno domény `.local` je zakázané úplně, protože koliduje s mDNS
 (Avahi/Bonjour) a rozbila by objevování služeb v síti.
 
+### Služba neběží pod rootem
+
+Na Linuxu běží server pod vlastním systémovým uživatelem. Port 53 by
+na to nestačil, protože je pod 1024 — místo práv roota dostane služba
+jedinou schopnost `CAP_NET_BIND_SERVICE`. Jednotka systemd k tomu
+zakazuje zápis mimo vlastní adresáře, spustitelnou paměť a zvyšování
+oprávnění (`NoNewPrivileges`).
+
+Na Windows služba běží pod `LocalSystem`. To je víc práv, než by bylo
+třeba, ale vlastní servisní účet by znamenal řešit hesla účtu
+a oprávnění k adresářům — **je to vědomá mezera, ne přehlédnutí.**
+
 ### Nic skrytého
 
 - Server ani klient nic neinstaluje bez výslovného souhlasu
   (`consent: true` v požadavku, potvrzení v průvodci).
 - Klient před změnou DNS zálohuje původní stav do souboru a při
   `leave` ho vrátí. Záloha je čitelný JSON, dá se vrátit i ručně.
+- Instalace služby bez `--yes` jen vypíše, co by udělala, a skončí.
+  Výpis je úplný: které soubory vzniknou, jaký uživatel se vytvoří,
+  jaká schopnost se binárce přidá.
 - Všechny soubory jsou ve dvou adresářích, odinstalace je jejich smazání
-  a odebrání služby. Žádné zápisy do registru mimo klíč služby, žádné
+  a odebrání služby (`ad-server uninstall-service --yes --purge`).
+- Ke stažení patří kontrolní součty SHA-256, aby se dalo ověřit, že
+  stažený soubor je ten, který vznikl při sestavení. Žádné zápisy do registru mimo klíč služby, žádné
   ovladače, žádná automatická aktualizace.
 - Žádná telemetrie, žádné odesílání dat ven.
 

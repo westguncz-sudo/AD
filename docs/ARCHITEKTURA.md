@@ -157,7 +157,7 @@ Pravidla, která v rozhraní platí:
 | databáze | `C:\ProgramData\ad-server\domain.db` | `/var/lib/ad-server/domain.db` |
 | certifikáty, CA | `C:\ProgramData\ad-server\pki\` | `/var/lib/ad-server/pki/` |
 | tapety a soubory | `...\assets\` | `/var/lib/ad-server/assets/` |
-| log | `...\logs\ad-server.log` | `/var/log/ad-server/ad-server.log` |
+| log | `...\logs\ad-server.log` | `/var/lib/ad-server/logs/ad-server.log` |
 | jednorázový token | `...\setup-token.txt` | `/var/lib/ad-server/setup-token.txt` |
 | stav klienta | `C:\ProgramData\ad-client\state.json` | `/var/lib/ad-client/state.json` |
 | záloha DNS klienta | `...\dns-backup.json` | `/var/lib/ad-client/dns-backup.json` |
@@ -409,16 +409,37 @@ které neumíme.
 
 ## 9. Běh jako služba
 
-| Systém | Jak | Co se udělá |
+| Systém | Co vznikne | Čím se ovládá |
 |---|---|---|
-| Windows | `windows-service` crate, `ad-server install-service` | zapíše službu `ADServer`, start automaticky, log do souboru |
-| Debian | jednotka systemd `/etc/systemd/system/ad-server.service` | `Type=notify`, `User=ad-server`, `AmbientCapabilities=CAP_NET_BIND_SERVICE` (port 53) |
-| Void | runit `/etc/sv/ad-server/run` | `exec chpst -u ad-server ... 2>&1`, log přes `svlogd` |
+| Debian a jiné se systemd | `/etc/systemd/system/ad-server.service` | `systemctl` |
+| Void Linux | `/etc/sv/ad-server/{run,log/run}` + odkaz ve `/var/service` | `sv` |
+| Windows | služba `ADServer` ve správci služeb | `sc`, Služby |
 
-Stejný binární soubor pozná, že ho spustil service manager (`--service`,
-resp. prostředí Windows SCM) a podle toho loguje. Na Linuxu port 53
-neřešíme spuštěním pod rootem, ale `CAP_NET_BIND_SERVICE`, resp. u Void
-`setcap` v instalačním skriptu.
+Instaluje se příkazem `ad-server install-service`. **Bez `--yes` jen
+vypíše, co by udělal, a skončí** — nic se nenainstaluje mimochodem.
+Odebrat jde vždycky: `ad-server uninstall-service --yes`, a s `--purge`
+zmizí i data.
+
+### Port 53 bez práv roota
+
+Port pod 1024 potřebuje na Linuxu oprávnění. Neřešíme to spouštěním
+pod rootem, ale jedinou schopností:
+
+* systemd: `AmbientCapabilities=CAP_NET_BIND_SERVICE` a
+  `CapabilityBoundingSet` omezený na ni jedinou,
+* runit: `setcap cap_net_bind_service=+ep` na binárce, protože `chpst`
+  shodí práva dřív, než se program dostane k portu.
+
+Jednotka systemd navíc zakazuje zápis mimo vlastní adresáře
+(`ProtectSystem=strict`, `ReadWritePaths`), vlastní obor jmen,
+spustitelnou paměť i další rodiny socketů než IP a Unix.
+
+### Co se neinstaluje
+
+Klient službou není. Je to program na vyžádání — `join`, `logon`,
+`policy`, `leave`. Zásady se stahují, když o to někdo požádá, ne na
+pozadí. Démon, který by se na pozadí hlásil serveru, by dával smysl
+teprve s přihlašováním do systému, a to zadání vylučuje.
 
 ## 10. Sestavení
 
@@ -434,8 +455,14 @@ cargo build --release --target x86_64-unknown-linux-musl
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Ověřeno ve fázi 1: oba cíle se přeloží, musl výstup je `static-pie`
-a nepotřebuje žádnou knihovnu.
+Všechno se překládá na Linuxu — Windows binárky křížově přes mingw.
+Ověřili jsme, že výsledná `.exe` potřebují jen systémové knihovny
+Windows (`kernel32`, `ws2_32`, `bcrypt`…), žádnou přibalenou DLL
+z mingw. Sestavení tak běží v jednom prostředí a dá se zopakovat.
+
+Hlídá to i `scripts/sestav-vydani.sh`: když by linuxová binárka nebyla
+statická nebo by `.exe` chtěla `libgcc`, skript skončí chybou. Tohle
+se nemá zjistit až u uživatele.
 
 Pozor na fázi 2: `rusqlite` s `bundled` kompiluje SQLite v C, takže pro
 musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
@@ -449,8 +476,8 @@ musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
 | 3 | webová správa (dashboard, průvodci, nástroje) | prohlížeč na 127.0.0.1 |
 | **4** | DNS server, zóny, forwarder | `bash docs/test-faze4.sh` |
 | **5** | klient: join, logon, zásady, leave | `bash docs/test-faze5.sh` |
-| 6 | Windows Service, systemd, runit | restart virtuálky |
-| 7 | `index.html`, SHA-256, GitHub Actions | stáhnout a spustit |
+| **6** | Windows Service, systemd, runit | `bash docs/test-faze6.sh` |
+| **7** | `index.html`, SHA-256, GitHub Actions | `bash scripts/sestav-vydani.sh` |
 
 Po každé fázi se čeká na tvůj test. Nic se neinstaluje a nemění v systému
 bez výslovného souhlasu a všechno jde odinstalovat.

@@ -11,6 +11,7 @@ mod dns;
 mod domain;
 mod http;
 mod pki;
+mod sluzba;
 mod store;
 
 use ad_core::{AdError, Result};
@@ -30,26 +31,52 @@ fn main() {
 /// Co se chce po serveru udělat.
 enum Prikaz {
     Spust,
+    /// Spuštění správcem služeb (Windows SCM).
+    SpustJakoSluzbu,
     Verze,
     Napoveda,
     UkazKonfiguraci,
     NovySetupToken,
+    NainstalujSluzbu,
+    OdinstalujSluzbu,
+    StavSluzby,
 }
 
 struct Argumenty {
     prikaz: Prikaz,
     data_dir: Option<PathBuf>,
     config: Option<PathBuf>,
+    sluzba: sluzba::Volby,
 }
 
 fn zparsuj_argumenty() -> Result<Argumenty> {
-    let mut a = Argumenty { prikaz: Prikaz::Spust, data_dir: None, config: None };
+    let mut a = Argumenty {
+        prikaz: Prikaz::Spust,
+        data_dir: None,
+        config: None,
+        sluzba: sluzba::Volby::default(),
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "run" => a.prikaz = Prikaz::Spust,
+            "service-run" => a.prikaz = Prikaz::SpustJakoSluzbu,
             "show-config" => a.prikaz = Prikaz::UkazKonfiguraci,
             "setup-token" => a.prikaz = Prikaz::NovySetupToken,
+            "install-service" => a.prikaz = Prikaz::NainstalujSluzbu,
+            "uninstall-service" => a.prikaz = Prikaz::OdinstalujSluzbu,
+            "service-status" => a.prikaz = Prikaz::StavSluzby,
+            "--yes" => a.sluzba.potvrzeno = true,
+            "--purge" => a.sluzba.smazat_data = true,
+            "--user" => {
+                a.sluzba.uzivatel =
+                    args.next().ok_or_else(|| AdError::bad_request("--user potřebuje jméno"))?
+            }
+            "--bin" => {
+                a.sluzba.binarka = Some(PathBuf::from(
+                    args.next().ok_or_else(|| AdError::bad_request("--bin potřebuje cestu"))?,
+                ))
+            }
             "-V" | "--version" => a.prikaz = Prikaz::Verze,
             "-h" | "--help" => a.prikaz = Prikaz::Napoveda,
             "--data-dir" => {
@@ -79,16 +106,29 @@ POUŽITÍ:
     ad-server [PŘÍKAZ] [PŘEPÍNAČE]
 
 PŘÍKAZY:
-    run             spustí server (výchozí)
-    show-config     vypíše výchozí konfiguraci k uložení do config.toml
-    setup-token     vytvoří nový jednorázový token pro první přihlášení
-                    (jen dokud doména neexistuje)
+    run                 spustí server (výchozí)
+    show-config         vypíše výchozí konfiguraci k uložení do config.toml
+    setup-token         vytvoří nový jednorázový token pro první přihlášení
+                        (jen dokud doména neexistuje)
+    install-service     nainstaluje server jako systémovou službu
+    uninstall-service   službu zase odebere
+    service-status      vypíše, jestli je služba nainstalovaná a běží
 
 PŘEPÍNAČE:
     --data-dir CESTA   kde držet databázi, certifikáty a soubory
     --config CESTA     cesta ke config.toml
+    --yes              u install-service a uninstall-service: opravdu to udělej
+    --user JMÉNO       uživatel, pod kterým služba poběží (Linux)
+    --bin CESTA        cesta k binárce pro službu (jinak ta běžící)
+    --purge            u uninstall-service smazat i data domény
     -V, --version      verze
     -h, --help         tato nápověda
+
+SLUŽBA:
+    Bez --yes příkaz jen vypíše, co by udělal, a skončí. Nic se
+    nenainstaluje bez výslovného souhlasu a všechno jde odebrat.
+    Na Linuxu server neběží pod rootem — port 53 řeší schopnost
+    CAP_NET_BIND_SERVICE.
 
 PROMĚNNÉ PROSTŘEDÍ:
     AD_SERVER_DATA_DIR   totéž jako --data-dir
@@ -147,15 +187,123 @@ fn hlavni() -> Result<()> {
         return Ok(());
     }
 
+    match args.prikaz {
+        Prikaz::NainstalujSluzbu => return sluzba::nainstaluj(&cesty, &konfigurace, &args.sluzba),
+        Prikaz::OdinstalujSluzbu => return sluzba::odinstaluj(&cesty, &args.sluzba),
+        Prikaz::StavSluzby => return sluzba::vypis_stav(&cesty),
+        _ => {}
+    }
+
     nastav_logovani(&konfigurace, &cesty)?;
     pki::init_rustls()?;
 
+    if let Prikaz::SpustJakoSluzbu = args.prikaz {
+        return spust_jako_sluzbu(cesty, konfigurace);
+    }
+
+    spust_v_runtime(cesty, konfigurace, pockej_na_signal())
+}
+
+/// Postaví běhové prostředí a spustí server. `konec` je to, na co se
+/// čeká — Ctrl-C, SIGTERM, nebo pokyn od správce služeb.
+fn spust_v_runtime(
+    cesty: Arc<Cesty>,
+    konfigurace: Arc<Config>,
+    konec: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("ad-server")
         .build()
         .map_err(|e| AdError::internal(format!("tokio runtime: {e}")))?;
-    runtime.block_on(spust(cesty, konfigurace))
+    runtime.block_on(spust(cesty, konfigurace, konec))
+}
+
+/// Běh pod správcem služeb Windows.
+///
+/// **Nemám jak vyzkoušet** — je to napsané podle dokumentace crate
+/// `windows-service`. Otestuj ve virtuálce s Windows.
+#[cfg(windows)]
+fn spust_jako_sluzbu(_cesty: Arc<Cesty>, _konfigurace: Arc<Config>) -> Result<()> {
+    windows_sluzba::spust()
+}
+
+#[cfg(not(windows))]
+fn spust_jako_sluzbu(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
+    // Na Linuxu služba spouští obyčejné `run`; systemd i runit čekají
+    // program v popředí. Tenhle příkaz je tu jen pro jednotnost.
+    tracing::info!("spouštím pod správcem služeb (systemd/runit)");
+    spust_v_runtime(cesty, konfigurace, pockej_na_signal())
+}
+
+#[cfg(windows)]
+mod windows_sluzba {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::mpsc;
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::{define_windows_service, service_dispatcher};
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    pub fn spust() -> Result<()> {
+        service_dispatcher::start(crate::sluzba::JMENO_WINDOWS, ffi_service_main)
+            .map_err(|e| AdError::internal(format!("nelze se ohlásit správci služeb: {e}")))
+    }
+
+    fn service_main(_args: Vec<OsString>) {
+        if let Err(e) = telo_sluzby() {
+            tracing::error!(chyba = %e.message, "služba skončila chybou");
+        }
+    }
+
+    fn telo_sluzby() -> Result<()> {
+        // Argumenty si přečteme z příkazové řádky procesu — správce
+        // služeb nás spustil s tím, co jsme při registraci zapsali.
+        let args = zparsuj_argumenty()?;
+        let cesty = Arc::new(Cesty::nove(args.data_dir, args.config));
+        let konfigurace = Arc::new(Config::nacti(&cesty.config)?);
+
+        let (poslat_stop, prijmout_stop) = mpsc::channel::<()>();
+        let obsluha = move |udalost| -> ServiceControlHandlerResult {
+            match udalost {
+                ServiceControl::Stop | ServiceControl::Shutdown => {
+                    let _ = poslat_stop.send(());
+                    ServiceControlHandlerResult::NoError
+                }
+                ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                _ => ServiceControlHandlerResult::NotImplemented,
+            }
+        };
+        let stav = service_control_handler::register(crate::sluzba::JMENO_WINDOWS, obsluha)
+            .map_err(|e| AdError::internal(format!("registrace obsluhy: {e}")))?;
+
+        let ohlas = |s: ServiceState, prijima: ServiceControlAccept| {
+            let _ = stav.set_service_status(ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: s,
+                controls_accepted: prijima,
+                exit_code: ServiceExitCode::Win32(0),
+                checkpoint: 0,
+                wait_hint: std::time::Duration::from_secs(10),
+                process_id: None,
+            });
+        };
+        ohlas(ServiceState::Running, ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN);
+
+        let vysledek = spust_v_runtime(cesty, konfigurace, async move {
+            // Čekání na pokyn ke stopnutí přesuneme mimo asynchronní
+            // vlákna — je to blokující kanál.
+            let _ = tokio::task::spawn_blocking(move || prijmout_stop.recv()).await;
+        });
+
+        ohlas(ServiceState::Stopped, ServiceControlAccept::empty());
+        vysledek
+    }
 }
 
 fn nastav_logovani(cfg: &Config, cesty: &Cesty) -> Result<()> {
@@ -185,7 +333,11 @@ fn nastav_logovani(cfg: &Config, cesty: &Cesty) -> Result<()> {
     Ok(())
 }
 
-async fn spust(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
+async fn spust(
+    cesty: Arc<Cesty>,
+    konfigurace: Arc<Config>,
+    konec: impl std::future::Future<Output = ()>,
+) -> Result<()> {
     tracing::info!(
         verze = ad_core::VERZE,
         protokol = ad_core::proto::PROTO_VERZE,
@@ -245,7 +397,7 @@ async fn spust(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
     vypis_uvod(&store, &konfigurace)?;
 
     // --- čekání na ukončení ---
-    pockej_na_signal().await;
+    konec.await;
     tracing::info!("ukončuji, zavírám poslouchátka");
     let _ = vypni.send(true);
 
