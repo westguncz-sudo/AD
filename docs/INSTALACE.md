@@ -773,6 +773,7 @@ s binárkami, kterou smažeš ručně.
 | `ad-server install-service` hlásí „nepoznal jsem správce služeb" | Stroj nemá systemd ani runit. Spusť server ručně: `ad-server run`. |
 | Služba se nespustí | `journalctl -u ad-server -n 50` (Debian), `tail /var/lib/ad-server/logs/current` (Void). |
 | V přehledu je „DNS server neposlouchá" | Port 53 drží něco jiného. `sudo ss -tulpn \| grep ':53'`. |
+| Kontrola předpokladů hlásí „na port 53 se nedá navázat" | Dvě možné příčiny. Buď port drží cizí DNS (`sudo ss -tulpn \| grep ':53'`, pak kapitola 2.2), nebo server neběží jako služba ani jako root a na porty pod 1024 nemá právo: `sudo setcap cap_net_bind_service=+ep /usr/local/bin/ad-server`. Nouzově jde v `config.toml` nastavit `[dns] bind = "0.0.0.0:5353"`. |
 | Kontrola předpokladů hlásí „IP adresa řadiče na tomto stroji není" | Zadal jsi adresu, kterou stroj nemá. Ověř `ip a`. |
 | Správa v prohlížeči nenaběhne | Běží SSH tunel? Zkus na serveru `curl -s http://127.0.0.1:8080/ \| head -3`. |
 | Zapomenutý jednorázový token | `sudo ad-server setup-token` vytvoří nový (jen dokud doména není). |

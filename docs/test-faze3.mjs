@@ -212,7 +212,23 @@ try {
   await snimek('12-povyseni-kontrola');
 
   const nainstalovat = stranka.locator('.radek-tlacitek button', { hasText: 'Nainstalovat' });
-  tvrd(!(await nainstalovat.isDisabled()), 'Nainstalovat je povolené');
+  if (await nainstalovat.isDisabled()) {
+    // Vypíšeme, která kontrola to zablokovala — jinak bychom jen
+    // koukali na zakázané tlačítko a hádali proč.
+    const blokujici = await stranka.locator('.seznam-kontrol li').evaluateAll(
+      (polozky) => polozky
+        .filter((li) => li.querySelector('.znak.fail'))
+        .map((li) => li.querySelector('.nazev')?.textContent
+          + ' — ' + li.querySelector('.detail')?.textContent));
+    chyba('Nainstalovat je povolené');
+    for (const b of blokujici) console.log('        blokuje: ' + b);
+    if (blokujici.some((b) => b.includes('53'))) {
+      console.log('        (na portu 53 nejspíš běží systemd-resolved:');
+      console.log('         sudo systemctl disable --now systemd-resolved)');
+    }
+    throw new Error('kontrola předpokladů nepustila povýšení dál');
+  }
+  ok('Nainstalovat je povolené');
   await nainstalovat.click();
   await stranka.waitForFunction(
     () => document.querySelector('.pruvodce-hlavicka h3')?.textContent === 'Výsledky',

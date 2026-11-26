@@ -266,7 +266,15 @@ mod tests {
             },
             confirm: true,
         };
-        crate::domain::promote(&store, &cesty, &req, false, "test", "127.0.0.1").unwrap();
+        crate::domain::promote(
+            &store,
+            &cesty,
+            &req,
+            crate::domain::StavDns { bezi: false, port: 15353 },
+            "test",
+            "127.0.0.1",
+        )
+        .unwrap();
         std::fs::remove_dir_all(&dir).ok();
 
         let zona = store.zona_podle_jmena("skola.internal").unwrap().unwrap();

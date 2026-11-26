@@ -46,6 +46,16 @@ trap uklid EXIT
 rm -rf "$DATA"
 mkdir -p "$SNIMKY"
 
+# DNS dáme na nesystémový port. Test tak nepotřebuje root ani volný
+# port 53 — na portech pod 1024 potřebuje proces zvláštní oprávnění
+# a na většině Linuxů je 53 obsazený systemd-resolved.
+cat > "$DATA/config.toml" <<EOF
+[dns]
+bind = "127.0.0.1:15353"
+enabled = true
+forward_only_local = true
+EOF
+
 echo "Startuji server s prázdnou databází…"
 "$SERVER_BIN" --data-dir "$DATA" --config "$DATA/config.toml" run \
   >"$DATA/server.out" 2>"$DATA/server.log" &

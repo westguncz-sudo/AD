@@ -668,8 +668,11 @@ async fn precheck(
     use std::sync::atomic::Ordering;
     let store = stav.store.clone();
     let cesty = stav.cesty.clone();
-    let dns_bezi = stav.dns.bezi.load(Ordering::Relaxed);
-    Ok(Json(blok(move || crate::domain::precheck(&store, &cesty, &req, dns_bezi)).await?))
+    let dns = crate::domain::StavDns {
+        bezi: stav.dns.bezi.load(Ordering::Relaxed),
+        port: stav.config.dns.bind.port(),
+    };
+    Ok(Json(blok(move || crate::domain::precheck(&store, &cesty, &req, dns)).await?))
 }
 
 async fn povys(
@@ -682,10 +685,12 @@ async fn povys(
     let cesty = stav.cesty.clone();
     let jmeno = spravce.jmeno();
     let ip_text = ip.text();
-    let dns_bezi = stav.dns.bezi.load(std::sync::atomic::Ordering::Relaxed);
+    let dns = crate::domain::StavDns {
+        bezi: stav.dns.bezi.load(std::sync::atomic::Ordering::Relaxed),
+        port: stav.config.dns.bind.port(),
+    };
     let odpoved =
-        blok(move || crate::domain::promote(&store, &cesty, &req, dns_bezi, &jmeno, &ip_text))
-            .await?;
+        blok(move || crate::domain::promote(&store, &cesty, &req, dns, &jmeno, &ip_text)).await?;
 
     // Teď existuje certifikát → nastartujeme doménové API.
     stav.signal_zmeny.send_modify(|v| *v += 1);
