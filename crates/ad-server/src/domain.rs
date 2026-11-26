@@ -612,7 +612,7 @@ pub fn promote(
         zones: zony,
         next_steps: vec![
             "Přihlas se znovu jako administrator s heslem, které jsi právě zadal.".into(),
-            format!("Otisk CA opiš klientům: ad-client join --fingerprint <otisk>"),
+            "Otisk CA opiš klientům: ad-client join --fingerprint <otisk>".to_string(),
             "Vytvoř organizační jednotky a uživatele v nástroji Uživatelé a počítače.".into(),
             "Nastav klientům tento server jako DNS (klient to udělá sám při připojení).".into(),
         ],

@@ -1,4 +1,16 @@
+# Verze Rustu je připnutá schválně.
+#
+# S "stable" by se překladač měnil pod rukama: nová verze přinese nové
+# kontroly clippy a sestavení, které včera prošlo, dnes spadne — aniž
+# by se v projektu cokoli změnilo. Přesně to se stalo při prvním
+# vydání (clippy 1.100 našel format! bez zástupných znaků, zatímco
+# 1.97 mlčel).
+#
+# Takhle má každý — tvůj stroj i GitHub Actions — stejný překladač
+# a stejné výsledky. Na novější verzi se přechází vědomě: změníš tenhle
+# řádek, spustíš `cargo clippy --workspace --all-targets -- -D warnings`
+# a opravíš, co nová verze najde.
 [toolchain]
-channel = "stable"
+channel = "1.100.0"
 components = ["rustfmt", "clippy"]
 targets = ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-gnu"]

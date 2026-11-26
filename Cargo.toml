@@ -7,8 +7,6 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
-authors = ["skolni projekt"]
-repository = "https://github.com/westguncz-sudo/ad"
 
 [workspace.lints.rust]
 unsafe_code = "warn"
