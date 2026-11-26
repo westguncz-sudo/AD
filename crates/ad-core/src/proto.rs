@@ -789,8 +789,17 @@ pub struct DnsStatusResponse {
     /// Adresy, které měl systém nastavené před námi — kam se vrátíme.
     pub original_forwarders: Vec<String>,
     pub queries_total: u64,
+    /// Dotazy zodpovězené z našich zón.
+    #[serde(default)]
+    pub queries_authoritative: u64,
     pub queries_forwarded: u64,
+    /// Dotazy zodpovězené ze zapamatovaných odpovědí.
+    #[serde(default)]
+    pub queries_cached: u64,
     pub queries_refused: u64,
+    /// Dotazy na jména, která v našich zónách nejsou.
+    #[serde(default)]
+    pub queries_nxdomain: u64,
     pub cache_entries: u64,
 }
 

@@ -83,6 +83,16 @@ Každý požadavek, který něco mění (POST, PUT, PATCH, DELETE), musí mít
 hlavičku `X-AD-CSRF: <csrf_token>`. Server navíc kontroluje `Origin`
 nebo `Referer` proti vlastní adrese. Čtení (GET) CSRF token nepotřebuje.
 
+Po obnovení stránky prohlížeč token v paměti nemá, ale cookie platí dál.
+Token se proto vrací i z `GET /me`. Není to díra: cizí stránka si
+odpověď přečíst nemůže (neposíláme žádné hlavičky CORS) a cookie má
+`SameSite=Strict`.
+
+V seznamech znamená `ou_id=0` „přímo pod doménou". Nula není platné id
+žádné organizační jednotky, takže se nedá splést — a `ou_id IS NULL`
+se v dotazu jinak zapsat nedá. Vynechané `ou_id` znamená „kdekoli
+v doméně" a používá se při hledání.
+
 ### První přihlášení, než doména existuje
 
 Čerstvý server žádné účty nemá. Při prvním startu vypíše do konzole
@@ -120,7 +130,7 @@ nedá zjistit, která jména v doméně existují.
 | POST | `/unjoin` | token počítače | odpojí počítač, uklidí DNS |
 | POST | `/machine/token` | tajemství počítače | vydá krátkodobý token |
 | GET | `/machine/policy` | token počítače | zásady pro počítač |
-| GET | `/machine/asset/{id}` | token počítače | stáhne tapetu |
+| GET | `/machine/asset/{id}` | token počítače | stáhne tapetu (fáze 5) |
 | POST | `/auth/logon` | token počítače | přihlásí uživatele, vrátí zásady |
 | POST | `/auth/change-password` | token počítače | změna hesla uživatelem |
 | POST | `/auth/logoff` | ticket uživatele | zneplatní ticket |
@@ -259,8 +269,9 @@ Dostupné jen z `127.0.0.1`. Měnící akce potřebují `X-AD-CSRF`.
 
 | Metoda | Cesta | Co dělá |
 |---|---|---|
+| GET | `/hello` | **bez přihlášení**: verze, stav serveru, jméno domény |
 | POST/DELETE | `/session` | přihlášení, odhlášení |
-| GET | `/me` | kdo je přihlášený |
+| GET | `/me` | kdo je přihlášený + CSRF token |
 | GET | `/status` | vše pro dashboard na jeden dotaz |
 | POST | `/roles` | „Přidat role a funkce“ — vyžaduje `consent: true` |
 | POST | `/promote/precheck` | kontrola předpokladů |
@@ -319,8 +330,9 @@ upozornění.
 | `/gpos`, `/gpos/{id}` | GET, POST, PATCH, DELETE |
 | `/gpos/{id}/links` | GET, POST, DELETE |
 | `/gpos/effective?ou_id=` | GET — výsledná sada zásad |
-| `/assets` | POST — nahrání tapety |
-| `/dns/status` | GET |
+| `/assets` | POST — nahrání tapety (tělo je obsah souboru) |
+| `/assets/{id}` | GET — náhled ve správě |
+| `/dns/status` | GET — běží/neběží, adresy, forwardery, počitadla |
 | `/dns/zones`, `/dns/zones/{id}` | GET, POST, DELETE |
 | `/dns/zones/{id}/records` | GET, POST |
 | `/dns/zones/{id}/records/{rid}` | PATCH, DELETE |
@@ -344,7 +356,24 @@ Audit zapisuje: čas, strojovou akci (`user.create`, `auth.logon.failed`),
 kdo (`SKOLA\administrator`, `machine:PC-01`, `setup-token`), čeho se to
 týkalo, IP a výsledek.
 
-## 6. Příklady na vyzkoušení (fáze 2 a dál)
+## 6. Co už funguje
+
+Stav po fázi 2 — co je hotové a co ještě ne:
+
+| Část | Stav |
+|---|---|
+| `/hello`, `/join`, `/unjoin`, `/machine/token` | hotovo |
+| `/auth/logon`, `/auth/change-password`, `/auth/logoff` | hotovo |
+| `/machine/policy` (včetně `If-None-Match`), `/heartbeat` | hotovo |
+| `/machine/asset/{id}` (tapeta) | hotovo |
+| správní API: session, status, roles, promote, demote, audit | hotovo |
+| správní API: OU, uživatelé, skupiny, počítače, zásady, DNS data | hotovo |
+| nahrání tapety (`POST /assets`) | hotovo |
+| webové rozhraní nad tím | hotovo |
+| vlastní DNS server na portu 53 | hotovo |
+| klient: join, status, logon, passwd, policy, leave | hotovo |
+
+## 7. Příklady na vyzkoušení
 
 ```bash
 # základní informace o serveru, bez přihlášení

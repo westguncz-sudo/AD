@@ -21,6 +21,7 @@ rozhodnutí, ne jen kód.
 |---|---|---|
 | **uživatel ve školní síti** | zkoušet hesla, číst API | zamykání účtů, omezení rychlosti podle IP, oddělené správní rozhraní |
 | **odposlech v síti** | čte provoz | TLS 1.2+ na doménovém API; správa jen na loopbacku nebo SSH tunelem |
+| **kdokoli v síti (DNS)** | ptát se, stáhnout zónu, zneužít k zesílení útoku | zákaz AXFR a ANY, přeposílání jen pro vnitřní síť, zkracování odpovědí |
 | **podvržený server (MITM)** | vydávat se za řadič | připnutý otisk CA, ověřený člověkem při připojení |
 | **podvržený klient** | hlásit se cizím jménem, zapsat cizí IP do DNS | tajemství počítače, server bere skutečnou IP spojení |
 | **škodlivá webová stránka** | poslat požadavek do naší správy z prohlížeče správce | CSRF token v hlavičce, kontrola `Origin`, `SameSite=Strict`, poslouchá jen loopback |
@@ -74,6 +75,28 @@ proto, že kdyby někdo přečetl databázi, nesmí se stát platným správcem.
 
 Porovnávání vždy v konstantním čase (`subtle::ConstantTimeEq`), nikdy
 `==` — porovnání po bajtech prozrazuje délku shodné předpony.
+
+### Klient: heslo se posílá až po ověření otisku
+
+Pořadí při připojení do domény není náhodné. Klient nejdřív naváže TLS
+a ověří otisk autority; teprve pak se ptá na heslo správce. Když otisk
+nesedí, neodejde nic — ani jméno účtu.
+
+Shoda otisku navíc nestačí sama o sobě: certifikát CA je veřejný,
+takže ho útočník může poslat taky. Klient proto ještě ověří, že
+certifikát serveru je tou autoritou **podepsaný**. Bez privátního klíče
+CA to obejít nejde.
+
+Uložený `ca.pem` se při každém spuštění porovnává s uloženým otiskem.
+Kdyby někdo soubor na disku vyměnil, klient to pozná a odmítne se
+připojit.
+
+### Heslo nikdy na příkazové řádce
+
+`ad-client --password tajne` program **odmítne**. Argumenty procesů
+jsou v systému veřejné (`ps`, Správce úloh) a zůstávají v historii
+shellu. Heslo se zadává interaktivně (s vypnutým zobrazováním, kde to
+jde), ze standardního vstupu, nebo z proměnné prostředí.
 
 ### Připnutý otisk CA, ne otisk serveru
 
@@ -144,6 +167,56 @@ Session cookie má `HttpOnly` (nedostane se k ní skript), `SameSite=Strict`
 (brání tomu Same-Origin Policy) a hlavičku si při jednoduchém požadavku
 nepřidá. Server kontroluje i `Origin`.
 
+### Webové rozhraní: nic se nenačítá zvenčí
+
+Rozhraní je celé v binárce a hlavička `Content-Security-Policy` je
+`default-src 'self'` bez `unsafe-inline` a `unsafe-eval`. Prohlížeč tedy
+nenačte skript ani styl odjinud a nespustí nic vloženého do stránky.
+K tomu `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
+(stránka nejde vložit do rámce, takže ani clickjacking) a
+`Referrer-Policy: no-referrer`.
+
+Do stránky se text vkládá výhradně přes `textContent`. Nejnebezpečnější
+údaj je jméno operačního systému, které o sobě hlásí klient — je to
+cizí text a kdyby se vložil jako HTML, stačilo by připojit počítač se
+jménem systému `<img onerror=…>` a skript by běžel v prohlížeči správce.
+Zákaz `innerHTML` hlídá pravidlo v `eslint.config.mjs`.
+
+### DNS: server, který je vidět z celé sítě
+
+DNS je jediná naše služba, na kterou se smí ozvat kdokoli bez hesla.
+Proto má vlastní sadu opatření:
+
+**Zesílení útoku (amplification).** Útočník pošle malý dotaz
+s podvrženou zdrojovou adresou oběti a velká odpověď letí na ni. Proti
+tomu: dotaz `ANY` odmítáme úplně, dotazy mimo naše zóny vyřizujeme jen
+klientům z vnitřních sítí (loopback, 10/8, 172.16/12, 192.168/16,
+169.254/16, ULA a link-local u IPv6), a odpověď přes UDP se vejde do
+512 bajtů, nebo se zkrátí s příznakem `tc` a tazatel se musí zeptat
+znovu přes TCP — což podvrženou adresu odhalí.
+
+**Stažení seznamu počítačů.** Přenos zóny (`AXFR`, `IXFR`) odmítáme.
+Jinak by si kdokoli v síti stáhl jména a adresy všech strojů naráz.
+
+**Podvržení odpovědi od forwarderu.** Když se ptáme nadřazeného
+serveru, přijatou odpověď přijmeme jen tehdy, když přišla od adresy,
+které jsme se ptali, má naše náhodné číslo dotazu a **tutéž otázku**.
+Číslo dotazu se bere z generátoru operačního systému, ne z počitadla.
+
+**Otrava paměti odpovědí.** Pamatujeme si jen odpovědi `NOERROR`
+a `NXDOMAIN`, nejdéle hodinu a nejkratší dobu 10 sekund. Při výdeji se
+od TTL odečte, jak dlouho už odpověď leží — jinak bychom tvrdili, že
+platí déle, než doopravdy platí. Paměť má strop 2000 položek, takže
+nejde nafouknout.
+
+**Nekonečná smyčka v CNAME.** Řetěz CNAME následujeme nejvýš osmkrát,
+pak vrátíme `SERVFAIL`.
+
+Co **neumíme** a neděláme, že umíme: DNSSEC. Nepodepisujeme ani
+neověřujeme podpisy. Klient se tedy musí spolehnout na to, že síť mezi
+ním a řadičem je důvěryhodná — a proto se doménové API ověřuje
+připnutým otiskem certifikátu, ne jménem z DNS.
+
 ### SQL
 
 Všechny dotazy jsou parametrizované (`rusqlite` `?1`, `?2`). Jména se
@@ -160,14 +233,31 @@ jsou zastropované všude: jména, popisy, heslo (256 bajtů), tapeta
 Jméno domény `.local` je zakázané úplně, protože koliduje s mDNS
 (Avahi/Bonjour) a rozbila by objevování služeb v síti.
 
+### Služba neběží pod rootem
+
+Na Linuxu běží server pod vlastním systémovým uživatelem. Port 53 by
+na to nestačil, protože je pod 1024 — místo práv roota dostane služba
+jedinou schopnost `CAP_NET_BIND_SERVICE`. Jednotka systemd k tomu
+zakazuje zápis mimo vlastní adresáře, spustitelnou paměť a zvyšování
+oprávnění (`NoNewPrivileges`).
+
+Na Windows služba běží pod `LocalSystem`. To je víc práv, než by bylo
+třeba, ale vlastní servisní účet by znamenal řešit hesla účtu
+a oprávnění k adresářům — **je to vědomá mezera, ne přehlédnutí.**
+
 ### Nic skrytého
 
 - Server ani klient nic neinstaluje bez výslovného souhlasu
   (`consent: true` v požadavku, potvrzení v průvodci).
 - Klient před změnou DNS zálohuje původní stav do souboru a při
   `leave` ho vrátí. Záloha je čitelný JSON, dá se vrátit i ručně.
+- Instalace služby bez `--yes` jen vypíše, co by udělala, a skončí.
+  Výpis je úplný: které soubory vzniknou, jaký uživatel se vytvoří,
+  jaká schopnost se binárce přidá.
 - Všechny soubory jsou ve dvou adresářích, odinstalace je jejich smazání
-  a odebrání služby. Žádné zápisy do registru mimo klíč služby, žádné
+  a odebrání služby (`ad-server uninstall-service --yes --purge`).
+- Ke stažení patří kontrolní součty SHA-256, aby se dalo ověřit, že
+  stažený soubor je ten, který vznikl při sestavení. Žádné zápisy do registru mimo klíč služby, žádné
   ovladače, žádná automatická aktualizace.
 - Žádná telemetrie, žádné odesílání dat ven.
 
@@ -202,4 +292,9 @@ Jméno domény `.local` je zakázané úplně, protože koliduje s mDNS
 - [ ] `ad-client leave` vrátí `/etc/resolv.conf` do původního stavu
 - [ ] zásada s neznámým polem se odmítne
 - [ ] tapeta s rozbitým součtem se zahodí
+- [ ] `dig @server skola.internal AXFR` selže
+- [ ] `dig @server skola.internal ANY` vrátí `REFUSED`
+- [ ] `ad-client join` se špatným otiskem neodešle heslo
+- [ ] vyměněný `ca.pem` u klienta se pozná
+- [ ] tapeta s rozbitým součtem se u klienta neuloží
 - [ ] odinstalace nenechá na stroji nic kromě logů

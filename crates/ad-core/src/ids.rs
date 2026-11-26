@@ -125,6 +125,9 @@ impl<'de> Deserialize<'de> for Sid {
 /// GUID objektu — stabilní napříč přejmenováním.
 pub type Guid = uuid::Uuid;
 
+/// Chyba při čtení GUID z textu.
+pub type GuidError = uuid::Error;
+
 /// Nový náhodný GUID (UUIDv4).
 pub fn novy_guid() -> Guid {
     uuid::Uuid::new_v4()

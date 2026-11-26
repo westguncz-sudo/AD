@@ -102,6 +102,53 @@ S `tls = true` se použije stejný certifikát jako pro doménové API, tedy
 podepsaný naší CA. Prohlížeč na varování upozorní, dokud do něj
 nenaimportuješ `ca.pem` — to je očekávané, ne chyba.
 
+Pozor na pořadí: certifikát vzniká až při vytvoření domény. Se
+`tls = true` na čistém serveru by nebylo čím šifrovat, takže server
+odmítne nastartovat a řekne to. Postup je: vytvoř doménu s `tls = false`,
+pak přepni na `true` a restartuj.
+
+## 3a. Webové rozhraní
+
+HTML, CSS i JavaScript jsou **uvnitř binárky** (`rust-embed`, adresář
+`crates/ad-server/web/`). Server je tím pádem jeden soubor a rozhraní
+funguje i na stroji bez internetu. V debug sestavení se soubory čtou
+z disku, takže se dají upravovat bez překladu.
+
+Žádný framework, žádná knihovna ze sítě. Důvod není puritánství:
+hlavička `Content-Security-Policy` je nastavená na `default-src 'self'`
+bez `unsafe-inline`, takže by se nic cizího stejně nenačetlo — a zároveň
+to znamená, že do stránky nejde propašovat skript.
+
+```
+index.html        kostra: přihlášení, hlavička, navigace, místo pro obsah
+css/app.css       vzhled, ikony kreslené v SVG (žádná loga Microsoftu)
+js/jadro.js       volání API, stavba DOM, dialogy, hlášení, formátování
+js/app.js         přihlášení, nabídky, vlaječka upozornění, směrování
+js/pruvodce.js    rám průvodce: kroky vlevo, obsah vpravo, tlačítka dole
+js/pohledy.js     Přehled, Místní server, oba průvodci, Auditní log
+js/nastroje.js    Uživatelé a počítače, Správce DNS, Zásady skupiny
+```
+
+Pravidla, která v rozhraní platí:
+
+* **Text se vkládá jen přes `textContent`**, nikdy `innerHTML`. Jména
+  uživatelů, popisy a hlavně to, co o sobě tvrdí klient (jméno systému),
+  jsou cizí text a nesmí se chovat jako HTML. Hlídá to i pravidlo
+  v `eslint.config.mjs`.
+* **Žádné `onclick=` v HTML** — CSP by je stejně zakázala. Posluchače
+  přidává `el()`.
+* **CSRF token se drží jen v paměti stránky**, nikdy v `localStorage`.
+  Po obnovení stránky se znovu vyzvedne z `GET /me`; cizí stránka si
+  tu odpověď přečíst nemůže, protože neposíláme žádné hlavičky CORS.
+* **Validace se dělá dvakrát.** Prohlížeč zkontroluje jméno domény,
+  jméno řadiče a IP adresu hned (`jadro.js`), aby uživatel nečekal na
+  odpověď. Rozhoduje ale vždycky server — kontrola v prohlížeči je
+  pohodlí, ne ochrana.
+* **Stav serveru se načítá před každým vykreslením stránky.** Průvodci
+  stav mění, takže navazující stránka musí vidět, co platí teď. (Tohle
+  byla chyba, kterou našel až test v prohlížeči: po instalaci rolí
+  tvrdil konfigurační průvodce, že role chybí.)
+
 ## 4. Kde co leží
 
 | | Windows | Debian / Void |
@@ -110,7 +157,7 @@ nenaimportuješ `ca.pem` — to je očekávané, ne chyba.
 | databáze | `C:\ProgramData\ad-server\domain.db` | `/var/lib/ad-server/domain.db` |
 | certifikáty, CA | `C:\ProgramData\ad-server\pki\` | `/var/lib/ad-server/pki/` |
 | tapety a soubory | `...\assets\` | `/var/lib/ad-server/assets/` |
-| log | `...\logs\ad-server.log` | `/var/log/ad-server/ad-server.log` |
+| log | `...\logs\ad-server.log` | `/var/lib/ad-server/logs/ad-server.log` |
 | jednorázový token | `...\setup-token.txt` | `/var/lib/ad-server/setup-token.txt` |
 | stav klienta | `C:\ProgramData\ad-client\state.json` | `/var/lib/ad-client/state.json` |
 | záloha DNS klienta | `...\dns-backup.json` | `/var/lib/ad-client/dns-backup.json` |
@@ -182,6 +229,18 @@ Hesla a tajemství jsou **jen** v `users.password_hash`,
 objekt do API, se jich nedotýká — struktury v `ad-core::model` je ani
 neumí reprezentovat.
 
+### Jedno spojení za mutexem
+
+`Store` drží jedno spojení k SQLite za `Mutex`. Metody jsou synchronní
+a HTTP vrstva je volá přes `tokio::task::spawn_blocking`, aby neblokovaly
+asynchronní vlákna (Argon2id trvá desítky milisekund, to by se poznalo).
+
+Mutex **není** reentrantní, takže metoda, která drží zámek, nesmí zavolat
+jinou metodu `Store`. Přesně na tom se povyšování domény ve fázi 2
+zaseklo. Teď to hlídá vlákno samo: druhé zamknutí skončí panikou
+s vysvětlením (`store/mod.rs`, test `vnorene_zamknuti_spadne_misto_zaseknuti`).
+Panika se dá najít a opravit, zaseknutý server ne.
+
 ## 6. TLS a vlastní certifikační autorita
 
 Při povýšení na řadič domény server vygeneruje (`rcgen`):
@@ -199,16 +258,27 @@ správce ho zadá klientovi (`ad-client join --fingerprint ...`).
 
 ## 7. DNS
 
-Vlastní server postavený na `hickory-proto` (parsování a skládání
-paketů). Odpovídání, zóny i forwarder jsou náš kód.
+Vlastní server postavený na `hickory-proto` (skládání a rozebírání
+paketů). Odpovídání, zóny, přeposílání i paměť odpovědí jsou náš kód.
 
 ```
 dotaz ──► patří do našich zón?
             ├── ano ──► odpověď z SQLite (A, AAAA, PTR, SRV, TXT, NS, MX, SOA)
-            │           nic nenalezeno → NXDOMAIN s naším SOA
-            └── ne ───► je forwarder? ──► ano: přepošli, výsledek do cache
-                                      └── ne: REFUSED
+            │           CNAME se následuje uvnitř zóny
+            │           jméno není     → NXDOMAIN + SOA v authority
+            │           jméno bez typu → NOERROR bez odpovědi + SOA
+            └── ne ───► smí ten klient přeposílat? ──► ne: REFUSED
+                        je forwarder?               ──► ne: REFUSED
+                        ano ──► přepošli, výsledek si chvíli pamatuj
 ```
+
+Rozdělení kódu:
+
+| Soubor | Co dělá |
+|---|---|
+| `dns/odpoved.rs` | sestaví odpověď ze zón; **nesahá na síť**, proto se dá celý otestovat |
+| `dns/forward.rs` | přeposílání na nadřazený server, paměť odpovědí, kontrola vnitřní sítě |
+| `dns/mod.rs` | poslouchání na UDP i TCP, odmítání, zkracování odpovědí, počitadla |
 
 Při vytvoření domény `skola.internal` se založí:
 
@@ -220,13 +290,35 @@ Při vytvoření domény `skola.internal` se založí:
 | | `_ad._tcp SRV` | `0 100 8443 dc01.skola.internal` |
 | `56.168.192.in-addr.arpa` | `10 PTR` | `dc01.skola.internal` |
 
-Forwarder se předvyplní tím, co měl systém nastavené **před** námi
-(`/etc/resolv.conf`, resp. Windows DNS klient). Klient při připojení
-k domény udělá to samé na své straně: zálohuje a nastaví sebe na náš
-server. Při odpojení se vrátí záloha.
+SRV záznam `_ad._tcp` není kosmetika — klient, který zná jen jméno
+domény, si jím najde adresu a port řadiče. Při připojení počítače do
+domény přibude jeho `A` a `PTR` záznam; při odpojení zase zmizí.
 
-SRV záznam `_ad._tcp` není kosmetika — klient, který zná jen jméno domény,
-si jím najde adresu a port řadiče.
+Forwarder se předvyplní tím, co měl systém nastavené **před** námi
+(`/etc/resolv.conf`). Klient při připojení udělá totéž na své straně:
+zálohuje a nastaví se na náš server, při odpojení zálohu vrátí.
+
+### Co server záměrně nedělá
+
+| | Proč |
+|---|---|
+| nepřenáší zóny (AXFR/IXFR) | jinak si kdokoli stáhne seznam všech počítačů v síti |
+| neodpovídá na dotaz `ANY` | malá otázka, velká odpověď — nástroj k zesílení útoku |
+| nepřeposílá pro veřejné adresy | otevřený přeposílač na internetu je zbraň, ne služba |
+| neumí rekurzi sám | kořenové servery a DNSSEC do školního projektu nepatří a nepředstíráme to |
+| neřeší DNSSEC | totéž — radši nic než něco, co vypadá jako podpis |
+
+Zapnout přeposílání i pro veřejné adresy jde v konfiguraci
+(`[dns] forward_only_local = false`), ale je to vědomé rozhodnutí
+a výchozí stav to není.
+
+### Port 53 a oprávnění
+
+Port pod 1024 potřebuje na Linuxu oprávnění. Neřešíme to spouštěním pod
+rootem, ale schopností `CAP_NET_BIND_SERVICE` (v jednotce systemd,
+u Void přes `setcap` v instalačním skriptu). Když se na port navázat
+nepovede, DNS server se nespustí, ale **zbytek serveru běží dál** —
+správa i doménové API fungují a v přehledu je vidět, že DNS neposlouchá.
 
 ## 8. Cesta zásad od správce ke klientovi
 
@@ -253,18 +345,101 @@ takže kdyby server poslal cokoli navíc, klient to odmítne už při
 parsování. Tapeta se přenáší jako obrázek s kontrolním součtem, formát se
 ověřuje podle magických bajtů a SVG je zakázané (je to XML se skriptem).
 
+## 8a. Klient
+
+```
+ad-client join    ověř otisk → heslo správce → účet → CA → stav → DNS → zásady
+ad-client status  co je uložené, co je v DNS teď a co bylo před připojením
+ad-client logon   přihlášení uživatele v programu, uvítací zpráva, zásady
+ad-client passwd  změna hesla uživatele
+ad-client policy  stažení zásad (s --apply i použití)
+ad-client leave   odhlásit u serveru → vrátit DNS → smazat místní soubory
+```
+
+### Připnutí otisku: dva kroky, ne jeden
+
+Certifikát domény nepodepsala veřejná autorita, takže ho systémové
+úložiště nezná. Klient si místo toho pamatuje otisk naší CA. Samotná
+shoda otisku by ale nestačila — certifikát CA je veřejný, takže by ho
+útočník mohl poslat taky, a k němu svůj vlastní certifikát serveru.
+Proto `spojeni.rs` dělá obojí:
+
+1. spočítá otisk autority z řetězce a porovná ho s připnutým,
+2. ověří, že certifikát serveru je **touhle autoritou podepsaný**
+   a platí pro jméno, na které se klient připojil.
+
+Bez privátního klíče CA se druhý krok obejít nedá.
+
+Při připojení se otisk ověřuje **dřív, než se odešle heslo správce**.
+Když nesedí, neodejde nic.
+
+### Pořadí při připojení a odpojení
+
+Připojení: ověř otisk → `/hello` → heslo správce → `/join` → ulož CA
+a stav → **zazálohuj DNS** → nastav DNS → stáhni zásady.
+
+Zálohu děláme **před** změnou. Když se záloha nepovede, DNS se vůbec
+nemění — lepší nechat počítač tak, jak byl, než mu vzít cestu zpátky.
+
+Odpojení jde přesně opačně a je k dispozici `--force` pro případ, že
+server už neexistuje. Bez něj klient nic nesmaže, aby šlo odpojení
+zkusit znovu.
+
+### Zásada je data, ne příkaz
+
+Klient přijatou zásadu **znovu zvaliduje** (`zasady::zkontroluj`).
+Nevěří ani vlastnímu serveru: kdyby se do databáze dostal nesmysl,
+nemá se podle něj chovat.
+
+Tapeta se stahuje zvlášť a klient u ní kontroluje tři věci: kontrolní
+součet proti hodnotě **v zásadě** (ne proti hlavičce od serveru),
+formát podle magických bajtů, a shodu s tím, co zásada slibovala.
+Když cokoli nesedí, soubor se zahodí.
+
+Text uvítací zprávy se před výpisem zbaví řídicích znaků — ANSI
+sekvence umí přepsat výpis v terminálu a podvrhnout uživateli něco
+jiného, než co tam správce napsal.
+
+### Co klient nedělá
+
+Nezasahuje do přihlašování do systému (Credential Provider, PAM).
+Z toho plyne, že tapetu nastavuje přihlášenému uživateli a volba
+„uživatel ji nemá měnit" je jen informace. Nepředstíráme vynucení,
+které neumíme.
+
 ## 9. Běh jako služba
 
-| Systém | Jak | Co se udělá |
+| Systém | Co vznikne | Čím se ovládá |
 |---|---|---|
-| Windows | `windows-service` crate, `ad-server install-service` | zapíše službu `ADServer`, start automaticky, log do souboru |
-| Debian | jednotka systemd `/etc/systemd/system/ad-server.service` | `Type=notify`, `User=ad-server`, `AmbientCapabilities=CAP_NET_BIND_SERVICE` (port 53) |
-| Void | runit `/etc/sv/ad-server/run` | `exec chpst -u ad-server ... 2>&1`, log přes `svlogd` |
+| Debian a jiné se systemd | `/etc/systemd/system/ad-server.service` | `systemctl` |
+| Void Linux | `/etc/sv/ad-server/{run,log/run}` + odkaz ve `/var/service` | `sv` |
+| Windows | služba `ADServer` ve správci služeb | `sc`, Služby |
 
-Stejný binární soubor pozná, že ho spustil service manager (`--service`,
-resp. prostředí Windows SCM) a podle toho loguje. Na Linuxu port 53
-neřešíme spuštěním pod rootem, ale `CAP_NET_BIND_SERVICE`, resp. u Void
-`setcap` v instalačním skriptu.
+Instaluje se příkazem `ad-server install-service`. **Bez `--yes` jen
+vypíše, co by udělal, a skončí** — nic se nenainstaluje mimochodem.
+Odebrat jde vždycky: `ad-server uninstall-service --yes`, a s `--purge`
+zmizí i data.
+
+### Port 53 bez práv roota
+
+Port pod 1024 potřebuje na Linuxu oprávnění. Neřešíme to spouštěním
+pod rootem, ale jedinou schopností:
+
+* systemd: `AmbientCapabilities=CAP_NET_BIND_SERVICE` a
+  `CapabilityBoundingSet` omezený na ni jedinou,
+* runit: `setcap cap_net_bind_service=+ep` na binárce, protože `chpst`
+  shodí práva dřív, než se program dostane k portu.
+
+Jednotka systemd navíc zakazuje zápis mimo vlastní adresáře
+(`ProtectSystem=strict`, `ReadWritePaths`), vlastní obor jmen,
+spustitelnou paměť i další rodiny socketů než IP a Unix.
+
+### Co se neinstaluje
+
+Klient službou není. Je to program na vyžádání — `join`, `logon`,
+`policy`, `leave`. Zásady se stahují, když o to někdo požádá, ne na
+pozadí. Démon, který by se na pozadí hlásil serveru, by dával smysl
+teprve s přihlašováním do systému, a to zadání vylučuje.
 
 ## 10. Sestavení
 
@@ -280,8 +455,14 @@ cargo build --release --target x86_64-unknown-linux-musl
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Ověřeno ve fázi 1: oba cíle se přeloží, musl výstup je `static-pie`
-a nepotřebuje žádnou knihovnu.
+Všechno se překládá na Linuxu — Windows binárky křížově přes mingw.
+Ověřili jsme, že výsledná `.exe` potřebují jen systémové knihovny
+Windows (`kernel32`, `ws2_32`, `bcrypt`…), žádnou přibalenou DLL
+z mingw. Sestavení tak běží v jednom prostředí a dá se zopakovat.
+
+Hlídá to i `scripts/sestav-vydani.sh`: když by linuxová binárka nebyla
+statická nebo by `.exe` chtěla `libgcc`, skript skončí chybou. Tohle
+se nemá zjistit až u uživatele.
 
 Pozor na fázi 2: `rusqlite` s `bundled` kompiluje SQLite v C, takže pro
 musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
@@ -290,13 +471,13 @@ musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
 
 | Fáze | Obsah | Test |
 |---|---|---|
-| **1** | architektura, protokol, `ad-core` | `cargo test`, `--version`, oba cíle |
-| 2 | SQLite, povýšení, uživatelé, přihlášení, TLS | `curl` proti API |
+| 1 | architektura, protokol, `ad-core` | `cargo test`, `--version`, oba cíle |
+| **2** | SQLite, povýšení, uživatelé, přihlášení, TLS | `bash docs/test-faze2.sh` |
 | 3 | webová správa (dashboard, průvodci, nástroje) | prohlížeč na 127.0.0.1 |
-| 4 | DNS server, zóny, forwarder | `dig @server`, `nslookup` |
-| 5 | klient: join, logon, zásady, leave | dvě virtuálky |
-| 6 | Windows Service, systemd, runit | restart virtuálky |
-| 7 | `index.html`, SHA-256, GitHub Actions | stáhnout a spustit |
+| **4** | DNS server, zóny, forwarder | `bash docs/test-faze4.sh` |
+| **5** | klient: join, logon, zásady, leave | `bash docs/test-faze5.sh` |
+| **6** | Windows Service, systemd, runit | `bash docs/test-faze6.sh` |
+| **7** | `index.html`, SHA-256, GitHub Actions | `bash scripts/sestav-vydani.sh` |
 
 Po každé fázi se čeká na tvůj test. Nic se neinstaluje a nemění v systému
 bez výslovného souhlasu a všechno jde odinstalovat.

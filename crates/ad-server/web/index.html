@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Správce serveru</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="/img/ikona.svg" type="image/svg+xml">
+</head>
+<body>
+
+<!-- Přihlašovací obrazovka. Zobrazí se, dokud nevíme, kdo jsi. -->
+<div id="prihlaseni" class="prihlaseni skryto">
+  <form class="prihlaseni-panel" id="prihlaseni-form" autocomplete="off">
+    <h1>Správce serveru</h1>
+    <p class="podtitul" id="prihlaseni-podtitul">Načítám stav serveru…</p>
+
+    <div class="prepinac-rezimu" id="prepinac-rezimu">
+      <button type="button" data-rezim="password" class="aktivni">Doménový účet</button>
+      <button type="button" data-rezim="setup_token">Jednorázový token</button>
+    </div>
+
+    <div id="pole-password">
+      <label class="pole">
+        <span>Uživatelské jméno</span>
+        <input type="text" id="prihlaseni-jmeno" autocomplete="username"
+               placeholder="administrator">
+      </label>
+      <label class="pole">
+        <span>Heslo</span>
+        <input type="password" id="prihlaseni-heslo" autocomplete="current-password">
+      </label>
+    </div>
+
+    <div id="pole-token" class="skryto">
+      <label class="pole">
+        <span>Jednorázový token z konzole serveru</span>
+        <input type="text" id="prihlaseni-token" class="mono" autocomplete="off">
+      </label>
+      <p class="maly slabe">
+        Token se vypsal při prvním spuštění serveru a je i v souboru
+        <span class="mono">setup-token.txt</span> v datovém adresáři.
+        Platí jen dokud nevytvoříš doménu.
+      </p>
+    </div>
+
+    <div id="prihlaseni-chyba" class="upozorneni error skryto">
+      <div class="text"><div class="nazev">Přihlášení selhalo</div>
+      <div class="detail" id="prihlaseni-chyba-text"></div></div>
+    </div>
+
+    <div class="radek-tlacitek">
+      <button type="submit" class="tlacitko hlavni" id="prihlaseni-tlacitko">Přihlásit</button>
+    </div>
+  </form>
+</div>
+
+<!-- Vlastní aplikace -->
+<div id="aplikace" class="skryto">
+  <header class="hlavicka">
+    <span class="nazev">Správce serveru</span>
+    <span class="cesta" id="cesta"></span>
+    <span class="mezera"></span>
+
+    <button class="hlavicka-tlacitko" id="tlacitko-upozorneni" aria-expanded="false"
+            title="Upozornění">
+      <svg class="ikona" viewBox="0 0 16 16" aria-hidden="true">
+        <path fill="currentColor" d="M3 1h2v14H3V1zm3 0c3 0 4 1.4 7 1.4V8.6C13 7.2 9 8.6 6 7.2V1z"/>
+      </svg>
+      <span class="odznak skryto" id="odznak-upozorneni">0</span>
+    </button>
+
+    <button class="hlavicka-tlacitko" id="tlacitko-spravovat" aria-expanded="false">
+      Spravovat
+    </button>
+
+    <button class="hlavicka-tlacitko" id="tlacitko-nastroje" aria-expanded="false">
+      Nástroje
+    </button>
+
+    <button class="hlavicka-tlacitko" id="tlacitko-obnovit" title="Obnovit (F5)">
+      <svg class="ikona" viewBox="0 0 16 16" aria-hidden="true">
+        <path fill="currentColor" d="M8 2a6 6 0 1 0 5.7 7.9l-1.9-.6A4 4 0 1 1 8 4v2.5L12 3.8 8 1v1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <div class="telo">
+    <nav class="navigace" id="navigace"></nav>
+    <main id="obsah"></main>
+  </div>
+</div>
+
+<div id="dialog-vrstva" class="dialog-vrstva skryto"></div>
+<div id="hlaseni" class="hlaseni"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
