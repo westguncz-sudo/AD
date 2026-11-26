@@ -198,16 +198,27 @@ jobs:
           } > popis.md
           cat popis.md
 
-      - name: Vytvořit vydání
+      - name: Vytvořit nebo doplnit vydání
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "ad ${{ github.ref_name }}" \
-            --notes-file popis.md \
-            dist/ad-server.exe \
-            dist/ad-client.exe \
-            dist/ad-server-linux \
-            dist/ad-client-linux \
-            dist/SHA256SUMS \
-            dist/index.html
+          ZNACKA="${{ github.ref_name }}"
+          SOUBORY="dist/ad-server.exe dist/ad-client.exe dist/ad-server-linux \
+                   dist/ad-client-linux dist/SHA256SUMS dist/index.html"
+
+          # Vydání už může existovat — třeba když ho někdo založil
+          # přes web GitHubu. Pak do něj soubory jen doplníme, místo
+          # abychom spadli na tom, že už tam je.
+          if gh release view "$ZNACKA" >/dev/null 2>&1; then
+            echo "Vydání $ZNACKA už existuje, doplňuji do něj soubory."
+            # shellcheck disable=SC2086
+            gh release upload "$ZNACKA" $SOUBORY --clobber
+            gh release edit "$ZNACKA" --notes-file popis.md
+          else
+            echo "Zakládám vydání $ZNACKA."
+            # shellcheck disable=SC2086
+            gh release create "$ZNACKA" \
+              --title "ad $ZNACKA" \
+              --notes-file popis.md \
+              $SOUBORY
+          fi
