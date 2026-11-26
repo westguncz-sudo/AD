@@ -3,7 +3,7 @@
 Návod od staženého souboru k funkční doméně. Píšu ho tak, jak bych to
 dělal sám — včetně míst, kde se to obvykle zasekne.
 
-Na konci je [řešení potíží](#8-řešení-potíží) a [odinstalace](#7-odinstalace).
+Na konci je [řešení potíží](#9-řešení-potíží) a [odinstalace](#8-odinstalace).
 
 ---
 
@@ -11,7 +11,7 @@ Na konci je [řešení potíží](#8-řešení-potíží) a [odinstalace](#7-odi
 
 | | |
 |---|---|
-| **Server** | Debian 13 (bez grafiky stačí) nebo Windows Server. Pevná IP adresa. |
+| **Server** | Debian 13 (bez grafiky stačí), Void Linux nebo Windows Server. Pevná IP adresa. |
 | **Klient** | Windows 11, Debian nebo Void Linux. |
 | **Síť** | Virtuálky se musí navzájem vidět. Ve VirtualBoxu *Host-only adapter*. |
 | **Soubory** | `ad-server-linux` + `ad-client-linux`, nebo `ad-server.exe` + `ad-client.exe` |
@@ -28,6 +28,19 @@ V celém návodu používám tyhle hodnoty — nahraď si je svými:
 > **Doménu nepojmenovávej s koncovkou `.local`.** Koliduje s mDNS
 > (Avahi, Bonjour) a rozbila by objevování služeb v síti. Server ji
 > odmítne. Používej `.internal`.
+
+Podle toho, co máš, pokračuj rovnou do správné kapitoly:
+
+| Server běží na | Kapitola |
+|---|---|
+| Debian (a jiné se systemd) | [2. Server na Debianu](#2-server-na-debianu) |
+| Windows Server | [3. Server na Windows Serveru](#3-server-na-windows-serveru) |
+| Void Linux | [4. Server na Void Linuxu](#4-server-na-void-linuxu) |
+
+| Klient běží na | Kapitola |
+|---|---|
+| Debian nebo Void | [5. Klient na Linuxu](#5-klient-na-linuxu-debian-i-void) |
+| Windows | [6. Klient na Windows](#6-klient-na-windows) |
 
 **Než začneš:** udělej si ve virtuálce snímek (snapshot) čistého stavu.
 Když něco pokazíš, vrátíš se k němu a zkusíš to znovu. Bez snímku se
@@ -375,11 +388,185 @@ Resolve-DnsName seznam.cz        # ověří přeposílání
 
 Vrátit zpět na DHCP: `Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ResetServerAddresses`
 
-## 4. Klient na Debianu nebo Void Linuxu
+## 4. Server na Void Linuxu
+
+Void nemá systemd — služby řídí **runit**. Instalátor to pozná sám
+a místo jednotky vytvoří adresář služby. Postup je jinak stejný jako
+na Debianu, liší se příkazy a jména balíčků.
+
+> Binárka je staticky slinkovaná, takže funguje na glibc i musl
+> variantě Voidu. Nic doinstalovávat kvůli ní nemusíš.
+
+### 4.1 Doinstaluj, co instalátor potřebuje
+
+```bash
+sudo xbps-install -S            # aktualizace seznamu balíčků
+sudo xbps-install -y libcap shadow bind-utils
+```
+
+| Balíček | K čemu |
+|---|---|
+| `libcap` | `setcap` — bez něj server nedosáhne na port 53 |
+| `shadow` | `useradd` — vytvoření systémového uživatele |
+| `bind-utils` | `dig` na ověření DNS (nepovinné, ale hodí se) |
+
+`runit`, `chpst` i `svlogd` jsou ve Voidu od začátku.
+
+### 4.2 Pevná IP adresa a jméno
+
+Void používá `dhcpcd`. Statickou adresu mu nastavíš v jeho konfiguraci:
+
+```bash
+echo dc01 | sudo tee /etc/hostname
+sudo hostname dc01
+
+ip -4 a                          # zjisti jméno karty, bývá enp0s8
+
+sudo tee -a /etc/dhcpcd.conf >/dev/null <<'EOF'
+
+interface enp0s8
+static ip_address=192.168.56.10/24
+EOF
+
+sudo sv restart dhcpcd
+ip -4 addr show enp0s8           # musí ukázat 192.168.56.10
+```
+
+### 4.3 Ať ti dhcpcd nepřepisuje resolv.conf
+
+Tohle je na Voidu nejčastější zádrhel: `dhcpcd` si `/etc/resolv.conf`
+přepisuje po svém, takže by nastavení DNS po restartu zmizelo.
+
+```bash
+# zapiš si, co tam je teď — bude to forwarder
+cat /etc/resolv.conf
+
+# řekni dhcpcd, ať na resolv.conf nesahá
+echo 'nohook resolv.conf' | sudo tee -a /etc/dhcpcd.conf
+sudo sv restart dhcpcd
+```
+
+Soubor zatím **nech, jak je** — má v něm zůstat stávající DNS server.
+Průvodce povýšením si z něj přečte, kam přeposílat dotazy, a na
+`127.0.0.1` přepneme až v kroku 4.7.
+
+### 4.4 Uvolni port 53
+
+Void ve výchozím stavu nic na portu 53 nemá, takže tenhle krok bývá
+prázdný. Ověř si to:
+
+```bash
+sudo ss -tulpn | grep ':53'      # nemělo by nic vypsat
+```
+
+Kdyby tam něco bylo (`dnsmasq`, `unbound`), vypni to:
+`sudo rm /var/service/dnsmasq`
+
+### 4.5 Nainstaluj službu
+
+```bash
+chmod +x ad-server-linux
+sudo cp ad-server-linux /usr/local/bin/ad-server
+
+sudo ad-server install-service          # jen ukáže, co udělá
+sudo ad-server install-service --yes
+sudo ad-server service-status
+```
+
+Co vznikne:
+
+| Co | Kde |
+|---|---|
+| skript služby | `/etc/sv/ad-server/run` |
+| skript logování | `/etc/sv/ad-server/log/run` |
+| zapnutí služby | odkaz `/var/service/ad-server` |
+| data | `/var/lib/ad-server/` |
+| konfigurace | `/etc/ad-server/config.toml` |
+| log | `/var/lib/ad-server/logs/current` |
+
+Ovládání:
+
+```bash
+sudo sv status ad-server
+sudo sv restart ad-server
+sudo sv down ad-server
+tail -f /var/lib/ad-server/logs/current
+```
+
+> **Rozdíl proti systemd:** runit shodí oprávnění dřív, než se program
+> dostane k portu. Proto instalátor volá `setcap` přímo na binárku
+> (`cap_net_bind_service=+ep /usr/local/bin/ad-server`). Když binárku
+> později nahradíš novější verzí, **setcap se ztratí** — po každé
+> aktualizaci ho nastav znovu:
+>
+> ```bash
+> sudo setcap cap_net_bind_service=+ep /usr/local/bin/ad-server
+> sudo sv restart ad-server
+> ```
+
+### 4.6 Správa, role a doména
+
+Správa poslouchá jen na `127.0.0.1:8080`. Ze svého počítače:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
+```
+
+Jednorázový token: `sudo cat /var/lib/ad-server/setup-token.txt`
+
+Dál postupuj stejně jako na Debianu —
+[Přidej role a vytvoř doménu](#26-přidej-role-a-vytvoř-doménu)
+a [opiš si otisk](#27-opiš-si-otisk-certifikátu).
+
+### 4.7 Přepni server na vlastní DNS
+
+```bash
+sudo tee /etc/resolv.conf >/dev/null <<'EOF'
+search skola.internal
+nameserver 127.0.0.1
+EOF
+
+dig +short dc01.skola.internal   # vlastní doména
+dig +short seznam.cz             # přeposílání dál
+```
+
+Díky `nohook resolv.conf` z kroku 4.3 to vydrží i po restartu.
+
+### 4.8 Ověř, že to přežije restart
+
+Tohle si na Voidu opravdu vyzkoušej — je to celý smysl toho, že server
+běží jako služba:
+
+```bash
+sudo reboot
+# po nastartování:
+sudo sv status ad-server         # run: ad-server: (pid …) …s
+dig +short dc01.skola.internal
+```
+
+## 5. Klient na Linuxu (Debian i Void)
+
+Klient je jedna a tatáž binárka pro obě distribuce — je staticky
+slinkovaná, takže nepotřebuje žádný balíček navíc.
 
 ```bash
 chmod +x ad-client-linux
 sudo cp ad-client-linux /usr/local/bin/ad-client
+```
+
+Na Voidu si přidej jen nástroje na ověřování (nepovinné):
+
+```bash
+sudo xbps-install -S bind-utils
+```
+
+A pokud na klientovi používáš `dhcpcd`, řekni mu, ať nesahá na
+`resolv.conf` — jinak by po restartu přepsal nastavení, které tam
+`ad-client` zapsal:
+
+```bash
+echo 'nohook resolv.conf' | sudo tee -a /etc/dhcpcd.conf
+sudo sv restart dhcpcd
 ```
 
 Ověř, že server je vidět:
@@ -415,13 +602,12 @@ ad-client passwd --user jan.novak     # změna hesla
 ad-client policy --apply              # znovu stáhnout a použít zásady
 ```
 
-> **Void Linux:** pokud chceš na klientovi používat `setcap` nebo
-> instalovat server, přidej `sudo xbps-install libcap shadow`.
-> Pro samotného klienta to potřeba není.
+Klient na Voidu žádnou službu neinstaluje — je to program na
+vyžádání, spouštíš ho, když ho potřebuješ.
 
 ---
 
-## 5. Klient na Windows
+## 6. Klient na Windows
 
 Zase **PowerShell jako správce** — klient mění nastavení DNS a zapisuje
 do `C:\ProgramData`.
@@ -482,7 +668,7 @@ Co klient na Windows mění:
 > Z toho plyne i to, že tapeta se nastaví uživateli, který příkaz
 > spustil, a volba „uživatel ji nemá měnit" je jen informace.
 
-## 6. Ověř, že to funguje
+## 7. Ověř, že to funguje
 
 ### DNS
 
@@ -520,7 +706,7 @@ Nová zpráva se musí objevit.
 
 ---
 
-## 7. Odinstalace
+## 8. Odinstalace
 
 Nic po sobě nenechává nic skrytého. Odinstalace je smazání dvou věcí:
 služby a datového adresáře.
@@ -553,6 +739,10 @@ Na Debianu nezapomeň vrátit DNS:
 sudo systemctl enable --now systemd-resolved
 ```
 
+Na Voidu smaž řádek `nohook resolv.conf` z `/etc/dhcpcd.conf`
+a restartuj `sudo sv restart dhcpcd` — resolv.conf si pak dhcpcd
+spraví sám.
+
 ### Na Windows
 
 ```powershell
@@ -576,7 +766,7 @@ s binárkami, kterou smažeš ručně.
 
 ---
 
-## 8. Řešení potíží
+## 9. Řešení potíží
 
 | Příznak | Co s tím |
 |---|---|
@@ -592,6 +782,17 @@ s binárkami, kterou smažeš ručně.
 | Klient: „počítač už je v doméně" | `sudo ad-client leave`, pak znovu `join`. |
 | Klient: heslo nejde zadat jako přepínač | Je to schválně — bylo by vidět v `ps`. Program se zeptá sám. |
 | Po `leave` nefunguje internet | Zkontroluj `/etc/resolv.conf`. Záloha byla v `/var/lib/ad-client/dns-backup.json`. |
+
+### Jen na Void Linuxu
+
+| Příznak | Co s tím |
+|---|---|
+| `install-service` hlásí, že chybí `setcap` | `sudo xbps-install libcap` |
+| `useradd: command not found` | `sudo xbps-install shadow` |
+| Po restartu je v `resolv.conf` zase něco jiného | Chybí `nohook resolv.conf` v `/etc/dhcpcd.conf`. |
+| Po výměně binárky nefunguje DNS na portu 53 | `setcap` se výměnou souboru ztratil: `sudo setcap cap_net_bind_service=+ep /usr/local/bin/ad-server && sudo sv restart ad-server` |
+| `sv status ad-server` hlásí `down` | `tail -30 /var/lib/ad-server/logs/current` |
+| `sv: fatal: unable to change to service directory` | Chybí odkaz: `sudo ln -s /etc/sv/ad-server /var/service/` |
 
 ### Jen na Windows
 
@@ -622,7 +823,7 @@ Pak se vrať k bodu 2.3.
 
 ---
 
-## 9. Kam dál
+## 10. Kam dál
 
 | Dokument | O čem je |
 |---|---|
