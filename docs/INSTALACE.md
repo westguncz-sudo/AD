@@ -244,38 +244,136 @@ V rozhraní **Nástroje → Uživatelé a počítače**:
 
 ## 3. Server na Windows Serveru
 
-Kroky jsou stejné, liší se jen příkazy. Příkazový řádek spusť
-**jako správce**.
+Postup je stejný jako na Debianu, liší se příkazy. **Všechno spouštěj
+v PowerShellu otevřeném jako správce** (pravým tlačítkem na Start →
+*Terminál (správce)*).
+
+### 3.1 Odblokuj stažený soubor
+
+Windows označí soubory stažené z internetu a SmartScreen je nepustí
+spustit. Tenhle program není podepsaný žádným certifikátem, takže se
+to stane.
 
 ```powershell
-# pevná adresa
-New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.56.10 -PrefixLength 24
-Rename-Computer -NewName DC01 -Restart
+cd C:\ad
+Unblock-File .\ad-server.exe
+Get-FileHash .\ad-server.exe -Algorithm SHA256   # porovnej s SHA256SUMS
+```
 
-# instalace
-mkdir C:\ad
+Kdyby přesto vyskočilo okno *Windows ochránil váš počítač*, klikni na
+**Další informace → Přesto spustit**. Pokud soubor spolkne Defender,
+přidej si v *Zabezpečení Windows → Ochrana před viry → Spravovat
+nastavení → Vyloučení* složku `C:\ad`.
+
+> Je to nepříjemné, ale je to správné chování Windows: neznámý
+> nepodepsaný program z internetu si tuhle nedůvěru zaslouží. Proto
+> jsou ke stažení kontrolní součty — ověř si je.
+
+### 3.2 Pevná IP adresa a jméno
+
+```powershell
+Get-NetAdapter                      # zjisti jméno karty
+New-NetIPAddress -InterfaceAlias "Ethernet" `
+  -IPAddress 192.168.56.10 -PrefixLength 24
+
+Rename-Computer -NewName DC01 -Restart
+```
+
+### 3.3 Uvolni port 53
+
+```powershell
+Get-NetTCPConnection -LocalPort 53 -ErrorAction SilentlyContinue
+Get-Process -Id (Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue).OwningProcess
+```
+
+Pokud má server nainstalovanou **roli DNS od Microsoftu**, drží port 53
+a náš server se nespustí. Buď ji odeber:
+
+```powershell
+Uninstall-WindowsFeature -Name DNS
+```
+
+…nebo nech naši službu poslouchat jinde. Po instalaci služby uprav
+`C:\ProgramData\ad-server\config.toml`:
+
+```toml
+[dns]
+bind = "0.0.0.0:5353"
+```
+
+### 3.4 Nainstaluj službu
+
+```powershell
+mkdir C:\ad -Force
 copy ad-server.exe C:\ad\
 cd C:\ad
-.\ad-server.exe install-service          # jen ukáže, co udělá
-.\ad-server.exe install-service --yes
 
-# porty pro klienty
+.\ad-server.exe install-service            # jen ukáže, co udělá
+.\ad-server.exe install-service --yes
+.\ad-server.exe service-status
+```
+
+Co vznikne:
+
+| Co | Kde |
+|---|---|
+| služba | `ADServer` (uvidíš ji v `services.msc`) |
+| data | `C:\ProgramData\ad-server\` |
+| konfigurace | `C:\ProgramData\ad-server\config.toml` |
+| log | `C:\ProgramData\ad-server\logs\ad-server.log` |
+
+`C:\ProgramData` je skrytá složka — do Průzkumníka ji napiš ručně,
+nebo použij `explorer C:\ProgramData\ad-server`.
+
+Služba běží pod účtem `LocalSystem`. To je víc oprávnění, než by bylo
+potřeba, ale vlastní servisní účet by znamenal řešit jeho heslo
+a oprávnění ke složkám. Je to vědomé zjednodušení.
+
+Ovládání služby:
+
+```powershell
+Get-Service ADServer
+Restart-Service ADServer
+Stop-Service ADServer
+Get-Content C:\ProgramData\ad-server\logs\ad-server.log -Tail 30 -Wait
+```
+
+### 3.5 Otevři správu
+
+Windows Server má grafiku, takže stačí na něm otevřít prohlížeč
+a jít na `http://127.0.0.1:8080`. Žádný tunel není potřeba.
+
+Jednorázový token:
+
+```powershell
+Get-Content C:\ProgramData\ad-server\setup-token.txt
+```
+
+Dál pokračuj stejně jako na Debianu — [kroky 2.6 a 2.7](#26-přidej-role-a-vytvoř-doménu):
+přidat role, povýšit na řadič domény, opsat si otisk.
+
+### 3.6 Pusť server do sítě
+
+```powershell
 New-NetFirewallRule -DisplayName "AD doménové API" -Direction Inbound `
   -Protocol TCP -LocalPort 8443 -Action Allow
-New-NetFirewallRule -DisplayName "AD DNS" -Direction Inbound `
+New-NetFirewallRule -DisplayName "AD DNS (UDP)" -Direction Inbound `
   -Protocol UDP -LocalPort 53 -Action Allow
-New-NetFirewallRule -DisplayName "AD DNS TCP" -Direction Inbound `
+New-NetFirewallRule -DisplayName "AD DNS (TCP)" -Direction Inbound `
   -Protocol TCP -LocalPort 53 -Action Allow
 ```
 
-Jednorázový token je v `C:\ProgramData\ad-server\setup-token.txt`.
-Správu otevři přímo na serveru v prohlížeči na `http://127.0.0.1:8080`.
+Port 8080 **neotvírej** — správa poslouchá jen na loopbacku.
 
-> **Pozor:** pokud na Windows Serveru běží role DNS od Microsoftu,
-> drží port 53 a náš server se nespustí. Vypni ji, nebo použij jiný
-> port v `C:\ProgramData\ad-server\config.toml`.
+### 3.7 Přepni server na vlastní DNS
 
----
+```powershell
+Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses 127.0.0.1
+Resolve-DnsName dc01.skola.internal
+Resolve-DnsName seznam.cz        # ověří přeposílání
+```
+
+Vrátit zpět na DHCP: `Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ResetServerAddresses`
 
 ## 4. Klient na Debianu nebo Void Linuxu
 
@@ -325,28 +423,64 @@ ad-client policy --apply              # znovu stáhnout a použít zásady
 
 ## 5. Klient na Windows
 
-Příkazový řádek **jako správce**:
+Zase **PowerShell jako správce** — klient mění nastavení DNS a zapisuje
+do `C:\ProgramData`.
 
 ```powershell
-mkdir C:\ad
+mkdir C:\ad -Force
 copy ad-client.exe C:\ad\
 cd C:\ad
-
-.\ad-client.exe join --server 192.168.56.10 `
-  --fingerprint A1:B2:C3:...:FF --admin administrator
-
-.\ad-client.exe status
-.\ad-client.exe logon --user jan.novak
+Unblock-File .\ad-client.exe
 ```
 
-Stav se ukládá do `C:\ProgramData\ad-client\`.
+Ověř, že na server vidíš:
+
+```powershell
+Test-NetConnection 192.168.56.10 -Port 8443    # TcpTestSucceeded : True
+```
+
+Připojení do domény (otisk opiš z kroku 3.5 / 2.7):
+
+```powershell
+.\ad-client.exe join --server 192.168.56.10 `
+  --fingerprint A1:B2:C3:...:FF --admin administrator
+```
+
+Program se zeptá na heslo správce. Na Windows **nejde schovat psaní**,
+takže heslo uvidíš — když ti to vadí, pošli ho vstupem:
+
+```powershell
+"Heslo-spravce" | .\ad-client.exe join --server 192.168.56.10 `
+  --fingerprint A1:B2:...:FF --admin administrator --password-stdin
+```
+
+Dál:
+
+```powershell
+.\ad-client.exe status
+.\ad-client.exe logon --user jan.novak
+.\ad-client.exe passwd --user jan.novak
+.\ad-client.exe policy --apply
+.\ad-client.exe leave          # odpojení a návrat DNS
+```
+
+Stav se ukládá do `C:\ProgramData\ad-client\`, původní nastavení DNS
+do `dns-backup.json` tamtéž.
+
+Co klient na Windows mění:
+
+| Co | Jak |
+|---|---|
+| DNS na síťových kartách | `Set-DnsClientServerAddress` (přes PowerShell) |
+| tapeta | `SystemParametersInfo` + klíče v `HKCU\Control Panel\Desktop` |
 
 > **Co tenhle program nedělá:** nezasahuje do přihlašování do Windows.
 > Doménovým účtem se přihlásíš **v tomhle programu**, ne na
 > přihlašovací obrazovce. Je to záměr — špatně napsaný Credential
 > Provider dokáže zamknout přihlášení do celého systému.
-
----
+>
+> Z toho plyne i to, že tapeta se nastaví uživateli, který příkaz
+> spustil, a volba „uživatel ji nemá měnit" je jen informace.
 
 ## 6. Ověř, že to funguje
 
@@ -419,7 +553,26 @@ Na Debianu nezapomeň vrátit DNS:
 sudo systemctl enable --now systemd-resolved
 ```
 
-Na Windows totéž pomocí `ad-server.exe uninstall-service --yes`.
+### Na Windows
+
+```powershell
+# klient
+.\ad-client.exe leave
+Remove-Item C:\ad\ad-client.exe
+
+# server
+.\ad-server.exe uninstall-service --yes            # data nechá
+.\ad-server.exe uninstall-service --yes --purge    # i s daty domény
+
+# pravidla firewallu
+Remove-NetFirewallRule -DisplayName "AD doménové API","AD DNS (UDP)","AD DNS (TCP)"
+
+# DNS zpátky na DHCP
+Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ResetServerAddresses
+```
+
+Po odinstalaci v systému nezůstane nic kromě složky `C:\ad`
+s binárkami, kterou smažeš ručně.
 
 ---
 
@@ -439,6 +592,19 @@ Na Windows totéž pomocí `ad-server.exe uninstall-service --yes`.
 | Klient: „počítač už je v doméně" | `sudo ad-client leave`, pak znovu `join`. |
 | Klient: heslo nejde zadat jako přepínač | Je to schválně — bylo by vidět v `ps`. Program se zeptá sám. |
 | Po `leave` nefunguje internet | Zkontroluj `/etc/resolv.conf`. Záloha byla v `/var/lib/ad-client/dns-backup.json`. |
+
+### Jen na Windows
+
+| Příznak | Co s tím |
+|---|---|
+| „Windows ochránil váš počítač" | Nepodepsaný program. **Další informace → Přesto spustit**, nebo `Unblock-File .\ad-server.exe`. |
+| Defender soubor smaže | Přidej složku `C:\ad` do vyloučení v Zabezpečení Windows. |
+| „Access is denied" při `install-service` | PowerShell není spuštěný jako správce. |
+| Služba se zaregistruje, ale hned spadne | `Get-Content C:\ProgramData\ad-server\logs\ad-server.log -Tail 30`. Nejčastěji obsazený port 53 rolí DNS od Microsoftu. |
+| `Get-Service ADServer` nic nenajde | Služba se nenainstalovala. Spusť `install-service --yes` znovu a přečti si výpis. |
+| Nevidím `C:\ProgramData` | Je skrytá. Napiš cestu do Průzkumníka ručně, nebo `explorer C:\ProgramData\ad-server`. |
+| Klient nenajde server | `Test-NetConnection 192.168.56.10 -Port 8443`. Když `False`, chybí pravidlo firewallu na serveru. |
+| Heslo je při psaní vidět | Na Windows psaní neschováváme. Použij `--password-stdin`. |
 
 ### Když potřebuješ začít znovu
 

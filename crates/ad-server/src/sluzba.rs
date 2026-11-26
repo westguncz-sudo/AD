@@ -161,7 +161,7 @@ pub fn nainstaluj(cesty: &Cesty, konfigurace: &Config, volby: &Volby) -> Result<
         Spravce::Systemd => nainstaluj_systemd(cesty, konfigurace, &binarka, volby),
         #[cfg(unix)]
         Spravce::Runit => nainstaluj_runit(cesty, konfigurace, &binarka, volby),
-        Spravce::Windows => nainstaluj_windows(cesty, &binarka),
+        Spravce::Windows => nainstaluj_windows(cesty, konfigurace, &binarka),
         _ => Err(AdError::bad_request(
             "nepoznal jsem správce služeb. Na Linuxu čekám systemd (/run/systemd/system) \
              nebo runit (/etc/sv). Server se dá spustit i ručně: ad-server run",
@@ -204,6 +204,7 @@ fn plan(spravce: Spravce, cesty: &Cesty, binarka: &Path, volby: &Volby) -> Vec<S
         Spravce::Windows => {
             kroky.push(format!("zaregistruje se služba {JMENO_WINDOWS} se spuštěním při startu"));
             kroky.push(format!("vznikne adresář {}", cesty.data_dir.display()));
+            kroky.push(format!("vznikne konfigurace {}", cesty.config.display()));
             kroky.push("služba poběží pod účtem LocalSystem".to_string());
         }
         Spravce::Neznamy => kroky.push("nic — správce služeb se nepodařilo poznat".to_string()),
@@ -462,7 +463,6 @@ fn priprav_adresare(cesty: &Cesty, _uzivatel: &str) -> Result<()> {
 }
 
 /// Zapíše konfiguraci, pokud ještě není — ať je co upravovat.
-#[cfg(unix)]
 fn uloz_konfiguraci(cesty: &Cesty, konfigurace: &Config) -> Result<()> {
     if cesty.config.exists() {
         println!("  • konfigurace {} už existuje, nechávám ji", cesty.config.display());
@@ -485,7 +485,7 @@ fn uloz_konfiguraci(cesty: &Cesty, konfigurace: &Config) -> Result<()> {
 /// dokumentace `windows-service`. Otestuj ji ve virtuálce s Windows —
 /// je to nejpravděpodobnější místo, kde se něco nepovede.
 #[cfg(windows)]
-fn nainstaluj_windows(cesty: &Cesty, binarka: &Path) -> Result<()> {
+fn nainstaluj_windows(cesty: &Cesty, konfigurace: &Config, binarka: &Path) -> Result<()> {
     use std::ffi::OsString;
     use windows_service::service::{
         ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType,
@@ -493,6 +493,7 @@ fn nainstaluj_windows(cesty: &Cesty, binarka: &Path) -> Result<()> {
     use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
     cesty.priprav()?;
+    uloz_konfiguraci(cesty, konfigurace)?;
 
     let spravce = ServiceManager::local_computer(
         None::<&str>,
@@ -545,7 +546,7 @@ fn nainstaluj_windows(cesty: &Cesty, binarka: &Path) -> Result<()> {
 }
 
 #[cfg(not(windows))]
-fn nainstaluj_windows(_cesty: &Cesty, _binarka: &Path) -> Result<()> {
+fn nainstaluj_windows(_cesty: &Cesty, _konfigurace: &Config, _binarka: &Path) -> Result<()> {
     Err(AdError::bad_request("Windows Service se dá nainstalovat jen na Windows"))
 }
 
