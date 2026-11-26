@@ -65,6 +65,13 @@ pub fn routes() -> Router<Stav> {
         .route("/admin/api/v1/gpos/{id}", get(gpo_detail).patch(uprav_gpo).delete(smaz_gpo))
         .route("/admin/api/v1/gpos/{id}/links", post(pripoj_gpo))
         // DNS (server začne poslouchat ve fázi 4, data se dají spravovat už teď)
+        .route(
+            "/admin/api/v1/assets",
+            post(nahraj_soubor).layer(axum::extract::DefaultBodyLimit::max(
+                ad_core::policy::MAX_TAPETA_BAJTU as usize + 4096,
+            )),
+        )
+        .route("/admin/api/v1/assets/{id}", get(stahni_soubor))
         .route("/admin/api/v1/dns/status", get(dns_stav))
         .route("/admin/api/v1/dns/forwarders", get(forwardery).put(nastav_forwardery))
         .route("/admin/api/v1/dns/zones", get(zony).post(vytvor_zonu))
@@ -113,6 +120,71 @@ pub struct AdminHello {
     pub domain_short_name: Option<String>,
     /// Platí ještě jednorázový token pro první přihlášení?
     pub setup_token_active: bool,
+}
+
+// =======================================================================
+// Soubory pro zásady
+// =======================================================================
+
+#[derive(serde::Deserialize)]
+struct JmenoSouboru {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// `POST /admin/api/v1/assets` — nahrání tapety.
+///
+/// Tělo je přímo obsah souboru. Formát se pozná z obsahu, přípona
+/// ani `Content-Type` nás nezajímají.
+async fn nahraj_soubor(
+    State(stav): State<Stav>,
+    spravce: Spravce,
+    ip: KlientIp,
+    Query(q): Query<JmenoSouboru>,
+    telo: axum::body::Bytes,
+) -> Odpoved<(StatusCode, Json<UploadAssetResponse>)> {
+    let store = stav.store.clone();
+    let cesty = stav.cesty.clone();
+    let jmeno = spravce.jmeno();
+    let ip_text = ip.text();
+    let puvodni = q.name.unwrap_or_default();
+    let odpoved = blok(move || {
+        let a = crate::assets::uloz(&store, &cesty, &telo, &puvodni)?;
+        store.zapis_audit(
+            "asset.upload",
+            &jmeno,
+            &format!("asset:{}", a.asset_id),
+            &ip_text,
+            true,
+            &format!("{}×{} px, {} B", a.width, a.height, a.size),
+        )?;
+        Ok(a)
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(odpoved)))
+}
+
+/// `GET /admin/api/v1/assets/{id}` — náhled ve správě.
+async fn stahni_soubor(
+    State(stav): State<Stav>,
+    _s: Spravce,
+    Path(id): Path<String>,
+) -> Odpoved<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let guid: ad_core::ids::Guid =
+        id.parse().map_err(|_| Chyba(AdError::bad_request("neplatný identifikátor souboru")))?;
+    let store = stav.store.clone();
+    let cesty = stav.cesty.clone();
+    let (data, popis) = blok(move || crate::assets::nacti(&store, &cesty, guid)).await?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, popis.format.mime().to_string()),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+        ],
+        data,
+    )
+        .into_response())
 }
 
 // =======================================================================

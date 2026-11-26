@@ -28,6 +28,8 @@ export default [
         Array: 'readonly',
         JSON: 'readonly',
         Error: 'readonly',
+        Event: 'readonly',
+        encodeURIComponent: 'readonly',
       },
     },
     rules: {

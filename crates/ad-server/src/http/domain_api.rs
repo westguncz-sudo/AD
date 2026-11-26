@@ -21,6 +21,7 @@ pub fn routes() -> Router<Stav> {
         .route("/api/v1/unjoin", post(unjoin))
         .route("/api/v1/machine/token", post(token_pocitace))
         .route("/api/v1/machine/policy", get(zasady_pocitace))
+        .route("/api/v1/machine/asset/{id}", get(soubor_pro_klienta))
         .route("/api/v1/auth/logon", post(logon))
         .route("/api/v1/auth/change-password", post(zmena_hesla))
         .route("/api/v1/auth/logoff", post(logoff))
@@ -306,6 +307,32 @@ async fn zasady_pocitace(
         policy_poll_seconds: INTERVAL_ZASAD_S,
     };
     Ok(([(header::ETAG, format!("\"{serial}\""))], Json(odpoved)).into_response())
+}
+
+/// `GET /api/v1/machine/asset/{id}` — stažení tapety klientem.
+///
+/// Posíláme i kontrolní součet v hlavičce. Klient si ho musí ověřit
+/// proti tomu, co má v zásadě — jinak soubor zahodí.
+async fn soubor_pro_klienta(
+    State(stav): State<Stav>,
+    _stroj: Stroj,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Odpoved<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let guid: ad_core::ids::Guid =
+        id.parse().map_err(|_| Chyba(AdError::bad_request("neplatný identifikátor souboru")))?;
+    let store = stav.store.clone();
+    let cesty = stav.cesty.clone();
+    let (data, popis) = blok(move || crate::assets::nacti(&store, &cesty, guid)).await?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, popis.format.mime().to_string()),
+            (axum::http::HeaderName::from_static("x-ad-sha256"), popis.sha256.clone()),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        data,
+    )
+        .into_response())
 }
 
 /// `POST /api/v1/auth/logon` — přihlášení doménového uživatele

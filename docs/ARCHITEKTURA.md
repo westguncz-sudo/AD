@@ -345,6 +345,68 @@ takže kdyby server poslal cokoli navíc, klient to odmítne už při
 parsování. Tapeta se přenáší jako obrázek s kontrolním součtem, formát se
 ověřuje podle magických bajtů a SVG je zakázané (je to XML se skriptem).
 
+## 8a. Klient
+
+```
+ad-client join    ověř otisk → heslo správce → účet → CA → stav → DNS → zásady
+ad-client status  co je uložené, co je v DNS teď a co bylo před připojením
+ad-client logon   přihlášení uživatele v programu, uvítací zpráva, zásady
+ad-client passwd  změna hesla uživatele
+ad-client policy  stažení zásad (s --apply i použití)
+ad-client leave   odhlásit u serveru → vrátit DNS → smazat místní soubory
+```
+
+### Připnutí otisku: dva kroky, ne jeden
+
+Certifikát domény nepodepsala veřejná autorita, takže ho systémové
+úložiště nezná. Klient si místo toho pamatuje otisk naší CA. Samotná
+shoda otisku by ale nestačila — certifikát CA je veřejný, takže by ho
+útočník mohl poslat taky, a k němu svůj vlastní certifikát serveru.
+Proto `spojeni.rs` dělá obojí:
+
+1. spočítá otisk autority z řetězce a porovná ho s připnutým,
+2. ověří, že certifikát serveru je **touhle autoritou podepsaný**
+   a platí pro jméno, na které se klient připojil.
+
+Bez privátního klíče CA se druhý krok obejít nedá.
+
+Při připojení se otisk ověřuje **dřív, než se odešle heslo správce**.
+Když nesedí, neodejde nic.
+
+### Pořadí při připojení a odpojení
+
+Připojení: ověř otisk → `/hello` → heslo správce → `/join` → ulož CA
+a stav → **zazálohuj DNS** → nastav DNS → stáhni zásady.
+
+Zálohu děláme **před** změnou. Když se záloha nepovede, DNS se vůbec
+nemění — lepší nechat počítač tak, jak byl, než mu vzít cestu zpátky.
+
+Odpojení jde přesně opačně a je k dispozici `--force` pro případ, že
+server už neexistuje. Bez něj klient nic nesmaže, aby šlo odpojení
+zkusit znovu.
+
+### Zásada je data, ne příkaz
+
+Klient přijatou zásadu **znovu zvaliduje** (`zasady::zkontroluj`).
+Nevěří ani vlastnímu serveru: kdyby se do databáze dostal nesmysl,
+nemá se podle něj chovat.
+
+Tapeta se stahuje zvlášť a klient u ní kontroluje tři věci: kontrolní
+součet proti hodnotě **v zásadě** (ne proti hlavičce od serveru),
+formát podle magických bajtů, a shodu s tím, co zásada slibovala.
+Když cokoli nesedí, soubor se zahodí.
+
+Text uvítací zprávy se před výpisem zbaví řídicích znaků — ANSI
+sekvence umí přepsat výpis v terminálu a podvrhnout uživateli něco
+jiného, než co tam správce napsal.
+
+### Co klient nedělá
+
+Nezasahuje do přihlašování do systému (Credential Provider, PAM).
+Z toho plyne, že tapetu nastavuje přihlášenému uživateli a volba
+„uživatel ji nemá měnit" je jen informace. Nepředstíráme vynucení,
+které neumíme.
+
 ## 9. Běh jako služba
 
 | Systém | Jak | Co se udělá |
@@ -386,7 +448,7 @@ musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
 | **2** | SQLite, povýšení, uživatelé, přihlášení, TLS | `bash docs/test-faze2.sh` |
 | 3 | webová správa (dashboard, průvodci, nástroje) | prohlížeč na 127.0.0.1 |
 | **4** | DNS server, zóny, forwarder | `bash docs/test-faze4.sh` |
-| 5 | klient: join, logon, zásady, leave | dvě virtuálky |
+| **5** | klient: join, logon, zásady, leave | `bash docs/test-faze5.sh` |
 | 6 | Windows Service, systemd, runit | restart virtuálky |
 | 7 | `index.html`, SHA-256, GitHub Actions | stáhnout a spustit |
 

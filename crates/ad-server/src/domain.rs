@@ -827,7 +827,8 @@ mod tests {
         let (store, cesty, _u) = prostredi();
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
         store.nastav_bool(nastaveni::ROLE_DNS, true).unwrap();
-        let odpoved = promote(&store, &cesty, &pozadavek(), false, "setup-token", "127.0.0.1").unwrap();
+        let odpoved =
+            promote(&store, &cesty, &pozadavek(), false, "setup-token", "127.0.0.1").unwrap();
 
         assert_eq!(odpoved.domain.dns_name, "skola.internal");
         assert_eq!(odpoved.domain.short_name, "SKOLA");

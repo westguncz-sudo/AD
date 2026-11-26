@@ -21,10 +21,15 @@ SERVER_BIN="${KOREN}/target/debug/ad-server"
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
 export NO_PROXY='*' no_proxy='*'
 
-if [ ! -x "$SERVER_BIN" ]; then
-  echo "Nejdřív přelož server:  cargo build -p ad-server"
-  exit 1
+# Překlad je součástí testu. Bez toho se snadno stane, že test běží
+# proti staré binárce a hlásí chyby, které už dávno nejsou.
+if command -v cargo >/dev/null 2>&1; then
+  echo "Překládám…"
+  (cd "$KOREN" && cargo build --quiet) || { echo "Překlad selhal."; exit 1; }
 fi
+for b in "$SERVER_BIN"; do
+  [ -x "$b" ] || { echo "Chybí $b — spusť: cargo build"; exit 1; }
+done
 if ! command -v node >/dev/null; then
   echo "Chybí Node.js. Test rozhraní bez něj spustit nejde."
   exit 1

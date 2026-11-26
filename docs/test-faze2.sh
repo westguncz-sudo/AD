@@ -35,10 +35,15 @@ uklid() {
 }
 trap uklid EXIT
 
-if [ ! -x "$SERVER_BIN" ]; then
-  echo "Nejdřív přelož server:  cargo build -p ad-server"
-  exit 1
+# Překlad je součástí testu. Bez toho se snadno stane, že test běží
+# proti staré binárce a hlásí chyby, které už dávno nejsou.
+if command -v cargo >/dev/null 2>&1; then
+  echo "Překládám…"
+  (cd "$KOREN" && cargo build --quiet) || { echo "Překlad selhal."; exit 1; }
 fi
+for b in "$SERVER_BIN"; do
+  [ -x "$b" ] || { echo "Chybí $b — spusť: cargo build"; exit 1; }
+done
 
 krok "Úklid a start serveru"
 rm -rf "$DATA"; mkdir -p "$DATA"

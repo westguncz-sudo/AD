@@ -142,6 +142,31 @@ export async function api(cesta, { metoda = 'GET', telo = null } = {}) {
   return data;
 }
 
+/**
+ * Nahraje soubor. Tělo je přímo jeho obsah — žádné kódování navíc.
+ * Formát rozhoduje server podle obsahu, ne podle toho, co napíšeme
+ * do hlavičky.
+ */
+export async function apiSoubor(cesta, soubor) {
+  const hlavicky = { 'content-type': soubor.type || 'application/octet-stream' };
+  if (stav.csrf) hlavicky['x-ad-csrf'] = stav.csrf;
+  const odpoved = await fetch('/admin/api/v1' + cesta, {
+    method: 'POST',
+    headers: hlavicky,
+    body: soubor,
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
+  let data = null;
+  try { data = await odpoved.json(); } catch { data = null; }
+  if (!odpoved.ok) {
+    const chyba = new Error(data?.error?.message || ('HTTP ' + odpoved.status));
+    chyba.kod = data?.error?.code || 'http_' + odpoved.status;
+    throw chyba;
+  }
+  return data;
+}
+
 // ------------------------------------------------------------ hlášení
 
 /** Krátká zpráva v pravém dolním rohu. */

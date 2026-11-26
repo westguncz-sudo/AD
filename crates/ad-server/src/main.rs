@@ -5,6 +5,7 @@
 //! * doménové API pro klienty přes TLS,
 //! * (od fáze 4) vlastní DNS server.
 
+mod assets;
 mod config;
 mod dns;
 mod domain;

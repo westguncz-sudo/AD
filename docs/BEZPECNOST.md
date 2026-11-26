@@ -76,6 +76,28 @@ proto, že kdyby někdo přečetl databázi, nesmí se stát platným správcem.
 Porovnávání vždy v konstantním čase (`subtle::ConstantTimeEq`), nikdy
 `==` — porovnání po bajtech prozrazuje délku shodné předpony.
 
+### Klient: heslo se posílá až po ověření otisku
+
+Pořadí při připojení do domény není náhodné. Klient nejdřív naváže TLS
+a ověří otisk autority; teprve pak se ptá na heslo správce. Když otisk
+nesedí, neodejde nic — ani jméno účtu.
+
+Shoda otisku navíc nestačí sama o sobě: certifikát CA je veřejný,
+takže ho útočník může poslat taky. Klient proto ještě ověří, že
+certifikát serveru je tou autoritou **podepsaný**. Bez privátního klíče
+CA to obejít nejde.
+
+Uložený `ca.pem` se při každém spuštění porovnává s uloženým otiskem.
+Kdyby někdo soubor na disku vyměnil, klient to pozná a odmítne se
+připojit.
+
+### Heslo nikdy na příkazové řádce
+
+`ad-client --password tajne` program **odmítne**. Argumenty procesů
+jsou v systému veřejné (`ps`, Správce úloh) a zůstávají v historii
+shellu. Heslo se zadává interaktivně (s vypnutým zobrazováním, kde to
+jde), ze standardního vstupu, nebo z proměnné prostředí.
+
 ### Připnutý otisk CA, ne otisk serveru
 
 Vlastní CA podepíše certifikát serveru. Klient si pamatuje otisk **CA**.
@@ -255,4 +277,7 @@ Jméno domény `.local` je zakázané úplně, protože koliduje s mDNS
 - [ ] tapeta s rozbitým součtem se zahodí
 - [ ] `dig @server skola.internal AXFR` selže
 - [ ] `dig @server skola.internal ANY` vrátí `REFUSED`
+- [ ] `ad-client join` se špatným otiskem neodešle heslo
+- [ ] vyměněný `ca.pem` u klienta se pozná
+- [ ] tapeta s rozbitým součtem se u klienta neuloží
 - [ ] odinstalace nenechá na stroji nic kromě logů

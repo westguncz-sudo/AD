@@ -14,8 +14,8 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 | 1 | architektura, protokol, sdílené jádro `ad-core` | hotovo |
 | 2 | server: SQLite, doména, uživatelé, přihlášení, TLS | hotovo |
 | 3 | webová správa (dashboard, průvodci, nástroje) | hotovo |
-| **4** | vlastní DNS server | **hotovo, k otestování** |
-| 5 | klient a zásady | čeká |
+| 4 | vlastní DNS server | hotovo |
+| **5** | klient a zásady | **hotovo, k otestování** |
 | 6 | služby: Windows Service, systemd, runit | čeká |
 | 7 | `index.html`, SHA-256, GitHub Actions | čeká |
 
@@ -63,11 +63,17 @@ crates/
       js/pruvodce.js       rám průvodce (kroky vlevo, tlačítka dole)
       js/pohledy.js        přehled, místní server, oba průvodci, audit
       js/nastroje.js       uživatelé a počítače, DNS, zásady skupiny
-  ad-client/               klient (fáze 5)
+  ad-client/               klient
+    src/spojeni.rs         TLS s připnutým otiskem autority, volání API
+    src/stav.rs            co si klient pamatuje mezi spuštěními
+    src/dns.rs             záloha, přepnutí a návrat nastavení DNS
+    src/zasady.rs          použití zásad: uvítací zpráva, tapeta
+    src/main.rs            příkazy join, status, logon, passwd, policy, leave
 docs/
   test-faze2.sh            automatický test serveru (85 kontrol)
   test-faze3.sh            automatický test rozhraní v prohlížeči (76 kontrol)
   test-faze4.sh            automatický test DNS serveru přes dig (41 kontrol)
+  test-faze5.sh            automatický test klienta a zásad (65 kontrol)
 ```
 
 Proč jedno sdílené jádro: kdyby měl server a klient každý svoji kopii
@@ -110,6 +116,60 @@ target/x86_64-pc-windows-gnu/release/ad-client.exe
 
 Linuxové verze jsou staticky slinkované (`static-pie`), takže běží na
 Debianu i na Void Linuxu bez instalace knihoven.
+
+## Test fáze 5
+
+```bash
+bash docs/test-faze5.sh
+```
+
+Server i klient běží na jednom stroji. Klient zapisuje do vlastního
+adresáře a nastavení DNS si přesměruje na dočasný soubor
+(`AD_CLIENT_RESOLV_CONF`), takže o nastavení tvého stroje nezavadí.
+
+### Ručně, ve dvou virtuálkách
+
+Na serveru najdi otisk certifikační autority: **Místní server →
+Certifikační autorita domény**. Je tam i hotový příkaz k opsání.
+
+```bash
+# na klientovi (Debian/Void) — zápis do /etc/resolv.conf chce práva
+sudo ad-client join --server 192.168.56.10      --fingerprint A1:B2:...:FF --admin administrator
+
+ad-client status                      # stav připojení, DNS, zásady
+ad-client logon --user jan.novak      # přihlášení v programu + zásady
+ad-client passwd --user jan.novak     # změna hesla
+ad-client policy --apply              # stáhnout a použít zásady
+sudo ad-client leave                  # odpojit a vrátit DNS
+```
+
+Na Windows totéž v příkazovém řádku spuštěném jako správce
+(`ad-client.exe join …`).
+
+Co zkusit naschvál špatně:
+
+| Zkus | Co se stane |
+|---|---|
+| `join` se špatným otiskem | spojení se nenaváže a **heslo správce se vůbec neodešle** |
+| `join` bez `--fingerprint` | klient odmítne a vysvětlí proč |
+| `--password tajne` na příkazové řádce | klient to odmítne (heslo by bylo vidět v `ps`) |
+| ručně přepsat `ca.pem` v datech klienta | klient pozná, že nesedí s uloženým otiskem |
+| vyměnit soubor tapety na serveru | klient ho zahodí, protože nesedí kontrolní součet |
+| `join` podruhé | klient řekne, že počítač už v doméně je |
+| `leave` při vypnutém serveru | klient nic nesmaže; s `--force` uklidí aspoň sebe |
+
+### Co klient záměrně nedělá
+
+Nezasahuje do přihlašování do systému — žádný Credential Provider na
+Windows, žádný modul PAM na Linuxu. Doménovým účtem se přihlásíš
+**v tomhle programu**, ne na přihlašovací obrazovce. Zadání to tak chce
+a je to i rozumné: špatně napsaný Credential Provider dokáže zamknout
+přihlášení do celého systému.
+
+Z toho plyne i omezení tapety: nastaví se přihlášenému uživateli
+(na Linuxu v GNOME přes `gsettings`, na Windows přes
+`SystemParametersInfo`). Volba „uživatel ji nemá měnit" je proto jen
+informace, ne vynucení — a tak je to i popsané v rozhraní.
 
 ## Test fáze 4
 

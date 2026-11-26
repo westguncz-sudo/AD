@@ -799,6 +799,15 @@ dl.vlastnosti dd { margin: 0; word-break: break-word; }
 .ikona { width: 16px; height: 16px; flex: 0 0 16px; }
 .ikona-velka { width: 20px; height: 20px; flex: 0 0 20px; }
 
+.nahled-tapety {
+  display: block;
+  max-width: 320px;
+  max-height: 180px;
+  border: 1px solid var(--ram);
+  margin: 6px 0;
+  background: #f7f8f9;
+}
+
 .sila-hesla { height: 5px; background: var(--ram-svetly); margin-top: 5px; }
 .sila-hesla > div { height: 100%; width: 0; background: var(--cervena); transition: width 0.15s; }
 .sila-hesla > div.stredni { background: var(--zluta); }

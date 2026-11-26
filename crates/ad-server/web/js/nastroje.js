@@ -3,8 +3,8 @@
 // a podrobnosti, stejně jako konzole ve Windows Serveru.
 
 import {
-  api, datum, datumKratke, dialog, el, hlas, hlasChybu, ikona, nahrad, panel,
-  popisStiznosti, siloměr, stav, tabulka,
+  api, apiSoubor, datum, datumKratke, dialog, el, hlas, hlasChybu, ikona, nahrad,
+  panel, popisStiznosti, siloměr, stav, tabulka,
 } from './jadro.js';
 
 // =====================================================================
@@ -1126,7 +1126,10 @@ export async function spravaZasad(kontejner) {
         : 'vypnutá'));
     }
     if (s.wallpaper) {
-      casti.push(radekNastaveni('Tapeta', s.wallpaper.enabled ? 'zapnutá' : 'vypnutá'));
+      casti.push(radekNastaveni('Tapeta', s.wallpaper.enabled
+        ? `zapnutá, ${s.wallpaper.style || 'fill'}`
+          + (s.wallpaper.lock_user_change ? ', uživatel ji nemá měnit' : '')
+        : 'vypnutá'));
     }
     if (casti.length === 0) {
       casti.push(el('p', { class: 'slabe', text:
@@ -1170,7 +1173,8 @@ export async function spravaZasad(kontejner) {
             : `${p.lockout.threshold} chyb / ${p.lockout.window_minutes} min → ${p.lockout.duration_minutes} min` }),
           el('dt', { text: 'Uvítací zpráva' }),
           el('dd', { text: p.welcome.enabled ? p.welcome.title || '(bez titulku)' : 'vypnutá' }),
-          el('dt', { text: 'Tapeta' }), el('dd', { text: p.wallpaper.enabled ? 'zapnutá' : 'vypnutá' }),
+          el('dt', { text: 'Tapeta' }),
+          el('dd', { text: p.wallpaper.enabled ? `zapnutá (${p.wallpaper.style})` : 'vypnutá' }),
           el('dt', { text: 'Sériové číslo' }), el('dd', { text: String(data.serial) })),
         el('p', { class: 'maly slabe', text: p.applied.length
           ? 'Použité zásady v pořadí: ' + p.applied
@@ -1320,6 +1324,62 @@ function dialogZasada(zasada, hotovo) {
   const okno = el('input', { type: 'number', value: String(l.window_minutes), min: '1', max: '1440' });
   const doba = el('input', { type: 'number', value: String(l.duration_minutes), min: '1', max: '10080' });
 
+  // --- tapeta ---
+  const t = s.wallpaper || { enabled: true, style: 'fill', lock_user_change: false };
+  const zapTapeta = el('input', { type: 'checkbox', checked: Boolean(s.wallpaper) });
+  const zapnutaTapeta = el('input', { type: 'checkbox', checked: t.enabled !== false });
+  const zamknoutTapetu = el('input', { type: 'checkbox', checked: Boolean(t.lock_user_change) });
+  const stylTapety = el('select', {},
+    [['fill', 'Vyplnit'], ['fit', 'Vejít se celý'], ['stretch', 'Roztáhnout'],
+     ['center', 'Vycentrovat'], ['tile', 'Vyskládat']]
+      .map(([v, popisek]) => el('option', {
+        value: v, text: popisek, selected: (t.style || 'fill') === v,
+      })));
+  const vyberSouboru = el('input', { type: 'file', accept: 'image/png,image/jpeg' });
+  const nahledTapety = el('div', { class: 'maly slabe' });
+  // Co je zrovna vybrané: buď už uložené v zásadě, nebo právě nahrané.
+  const tapeta = {
+    asset_id: t.asset_id || null,
+    sha256: t.sha256 || null,
+    format: t.format || null,
+  };
+
+  function vykresliNahled() {
+    if (!tapeta.asset_id) {
+      nahrad(nahledTapety, el('span', { text: 'Zatím není vybraný žádný obrázek.' }));
+      return;
+    }
+    const obrazek = el('img', {
+      src: `/admin/api/v1/assets/${tapeta.asset_id}`,
+      alt: 'Náhled tapety',
+      class: 'nahled-tapety',
+    });
+    nahrad(nahledTapety,
+      obrazek,
+      el('div', { class: 'mono maly', text: `sha256: ${(tapeta.sha256 || '').slice(0, 32)}…` }));
+  }
+  vykresliNahled();
+
+  vyberSouboru.addEventListener('change', async () => {
+    const soubor = vyberSouboru.files?.[0];
+    if (!soubor) return;
+    nahrad(nahledTapety, el('span', { text: 'Nahrávám…' }));
+    try {
+      const vysledek = await apiSoubor(
+        `/assets?name=${encodeURIComponent(soubor.name)}`, soubor);
+      tapeta.asset_id = vysledek.asset_id;
+      tapeta.sha256 = vysledek.sha256;
+      tapeta.format = vysledek.format;
+      zapTapeta.checked = true;
+      zapTapeta.dispatchEvent(new Event('change'));
+      vykresliNahled();
+      hlas('Obrázek nahrán', `${vysledek.width}×${vysledek.height} px`, 'uspech');
+    } catch (e) {
+      vykresliNahled();
+      hlasChybu(e);
+    }
+  });
+
   // --- uvítací zpráva ---
   const zapZprava = el('input', { type: 'checkbox', checked: Boolean(s.welcome) });
   const w = s.welcome || { enabled: true, title: '', body: '' };
@@ -1377,12 +1437,20 @@ function dialogZasada(zasada, hotovo) {
         el('label', { class: 'pole' }, el('span', { text: 'Text' }), text)),
         'Čistý text. Řídicí znaky server odmítne, aby se nedal podvrhnout výpis v klientovi.'),
 
-      el('div', { class: 'panel' },
-        el('h3', { text: 'Tapeta' }),
-        el('div', { class: 'panel-telo' },
-          el('p', { class: 'slabe', text:
-            'Nahrávání obrázku a jeho rozesílání klientům přijde ve fázi 5. '
-            + 'Struktura zásady je hotová, jen chybí nahrání souboru.' })))),
+      skupina(zapTapeta, 'Tapeta', el('div', {},
+        el('label', { class: 'zatrzitko' }, zapnutaTapeta,
+          el('span', { text: 'Tapetu nastavovat' })),
+        el('label', { class: 'pole' },
+          el('span', { text: 'Obrázek (PNG nebo JPEG, nejvýš 8 MiB)' }), vyberSouboru),
+        nahledTapety,
+        el('label', { class: 'pole' }, el('span', { text: 'Umístění' }), stylTapety),
+        el('label', { class: 'zatrzitko' }, zamknoutTapetu,
+          el('span', {}, 'Oznámit uživateli, že tapetu nemá měnit',
+            el('span', { class: 'popis', text:
+              'Je to jen informace. Vynutit to bez zásahu do přihlašování '
+              + 'do systému nejde a nepředstíráme, že ano.' })))),
+        'Klient si obrázek stáhne zvlášť a ověří jeho kontrolní součet. '
+        + 'Když nesedí, soubor zahodí.')),
     tlacitka: [{
       text: jeNova ? 'Vytvořit' : 'Uložit',
       hlavni: true,
@@ -1413,6 +1481,20 @@ function dialogZasada(zasada, hotovo) {
             enabled: zapnutaZprava.checked,
             title: titulek.value,
             body: text.value,
+          };
+        }
+        if (zapTapeta.checked) {
+          if (zapnutaTapeta.checked && !tapeta.asset_id) {
+            hlas('Chybí obrázek', 'Zapnutá tapeta potřebuje nahraný soubor.', 'chyba');
+            return false;
+          }
+          nastaveni.wallpaper = {
+            enabled: zapnutaTapeta.checked,
+            asset_id: tapeta.asset_id,
+            sha256: tapeta.sha256,
+            format: tapeta.format,
+            style: stylTapety.value,
+            lock_user_change: zamknoutTapetu.checked,
           };
         }
 

@@ -330,7 +330,8 @@ upozornění.
 | `/gpos`, `/gpos/{id}` | GET, POST, PATCH, DELETE |
 | `/gpos/{id}/links` | GET, POST, DELETE |
 | `/gpos/effective?ou_id=` | GET — výsledná sada zásad |
-| `/assets` | POST — nahrání tapety |
+| `/assets` | POST — nahrání tapety (tělo je obsah souboru) |
+| `/assets/{id}` | GET — náhled ve správě |
 | `/dns/status` | GET — běží/neběží, adresy, forwardery, počitadla |
 | `/dns/zones`, `/dns/zones/{id}` | GET, POST, DELETE |
 | `/dns/zones/{id}/records` | GET, POST |
@@ -364,12 +365,13 @@ Stav po fázi 2 — co je hotové a co ještě ne:
 | `/hello`, `/join`, `/unjoin`, `/machine/token` | hotovo |
 | `/auth/logon`, `/auth/change-password`, `/auth/logoff` | hotovo |
 | `/machine/policy` (včetně `If-None-Match`), `/heartbeat` | hotovo |
-| `/machine/asset/{id}` (tapeta) | fáze 5 |
+| `/machine/asset/{id}` (tapeta) | hotovo |
 | správní API: session, status, roles, promote, demote, audit | hotovo |
 | správní API: OU, uživatelé, skupiny, počítače, zásady, DNS data | hotovo |
-| nahrání tapety (`POST /assets`) | fáze 5 |
+| nahrání tapety (`POST /assets`) | hotovo |
 | webové rozhraní nad tím | hotovo |
 | vlastní DNS server na portu 53 | hotovo |
+| klient: join, status, logon, passwd, policy, leave | hotovo |
 
 ## 7. Příklady na vyzkoušení
 

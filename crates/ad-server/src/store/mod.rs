@@ -370,6 +370,66 @@ impl Store {
         })
     }
 
+    // -------------------------------------------------------------------
+    // Soubory pro zásady (tapety)
+    // -------------------------------------------------------------------
+
+    /// Zapíše popis nahraného souboru.
+    ///
+    /// Bere rovnou `UploadAssetResponse`, protože to je přesně ten
+    /// popis, co se o souboru zjistil — a osm volných parametrů by se
+    /// dalo snadno prohodit.
+    pub fn vloz_asset(
+        &self,
+        popis: &ad_core::proto::UploadAssetResponse,
+        puvodni_jmeno: &str,
+    ) -> Result<()> {
+        let c = self.lock();
+        c.execute(
+            "INSERT INTO assets(id, sha256, size, format, width, height,
+                 original_name, created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            rusqlite::params![
+                popis.asset_id.to_string(),
+                popis.sha256,
+                popis.size as i64,
+                popis.format.pripona(),
+                popis.width as i64,
+                popis.height as i64,
+                puvodni_jmeno,
+                cas_do_db(ad_core::nyni())
+            ],
+        )
+        .map_err(db_chyba)?;
+        Ok(())
+    }
+
+    pub fn asset(&self, id: ad_core::ids::Guid) -> Result<ad_core::proto::UploadAssetResponse> {
+        let c = self.lock();
+        c.query_row(
+            "SELECT sha256, size, format, width, height FROM assets WHERE id = ?1",
+            [id.to_string()],
+            |r| {
+                let format: String = r.get(2)?;
+                Ok(ad_core::proto::UploadAssetResponse {
+                    asset_id: id,
+                    sha256: r.get(0)?,
+                    size: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                    format: if format == "png" {
+                        ad_core::policy::ImageFormat::Png
+                    } else {
+                        ad_core::policy::ImageFormat::Jpeg
+                    },
+                    width: u32::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
+                    height: u32::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                })
+            },
+        )
+        .optional()
+        .map_err(db_chyba)?
+        .ok_or_else(|| AdError::not_found(format!("soubor {id} neexistuje")))
+    }
+
     /// Počty objektů pro přehled.
     pub fn pocty(&self) -> Result<ad_core::proto::Counts> {
         let c = self.lock();

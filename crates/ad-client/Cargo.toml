@@ -14,3 +14,13 @@ workspace = true
 
 [dependencies]
 ad-core = { version = "0.1.0", path = "../ad-core" }
+base64 = "0.23.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.13.0", features = ["client", "http1"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "logging", "tls12", "std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+time = { version = "0.3.44", features = ["formatting", "parsing"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "fs"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
