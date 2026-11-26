@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vlastní obdoba Active Directory — ke stažení</title>
+<style>
+  :root {
+    --banner: #16456b; --modra: #1f6fb2; --modra-svetla: #e9eff5;
+    --pozadi: #f3f4f6; --panel: #fff; --ram: #c8d1da; --ram-svetly: #e3e8ed;
+    --text: #20262e; --text-slaby: #5a6673;
+    --zelena: #107c10; --zluta: #b58105; --cervena: #a4262c;
+    --mono: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--pozadi); color: var(--text);
+    font: 15px/1.6 "Segoe UI", "Noto Sans", system-ui, Arial, sans-serif;
+  }
+  header {
+    background: linear-gradient(135deg, #0f3251 0%, #16456b 55%, #1f6fb2 100%);
+    color: #fff; padding: 40px 24px 34px;
+  }
+  header .obal { max-width: 960px; margin: 0 auto; }
+  header h1 { margin: 0 0 6px; font-size: 30px; font-weight: 300; }
+  header p { margin: 0; opacity: .9; max-width: 70ch; }
+  header .verze {
+    display: inline-block; margin-top: 14px; padding: 3px 10px;
+    border: 1px solid rgba(255,255,255,.45); border-radius: 12px; font-size: 13px;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  section { background: var(--panel); border: 1px solid var(--ram); margin-bottom: 20px; }
+  section > h2 {
+    margin: 0; padding: 12px 18px; font-size: 14px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--banner);
+    border-bottom: 1px solid var(--ram-svetly); background: #fafbfc;
+  }
+  section > div { padding: 18px; }
+  h3 { margin: 22px 0 8px; font-size: 16px; color: var(--banner); }
+  h3:first-child { margin-top: 0; }
+  p { margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 8px 10px; background: #f7f8f9;
+       border-bottom: 1px solid var(--ram); color: var(--text-slaby); font-weight: 600; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--ram-svetly); vertical-align: top; }
+  td.soucet { font-family: var(--mono); font-size: 11px; word-break: break-all; color: var(--text-slaby); }
+  a { color: var(--modra); }
+  a.stahnout {
+    display: inline-block; padding: 5px 14px; background: var(--modra); color: #fff;
+    text-decoration: none; border-radius: 2px; font-weight: 600; white-space: nowrap;
+  }
+  a.stahnout:hover { background: #19578c; }
+  code { font-family: var(--mono); font-size: 13px; background: #eef1f4; padding: 1px 5px; }
+  pre {
+    font-family: var(--mono); font-size: 13px; background: #1e2a36; color: #e6edf3;
+    padding: 14px 16px; overflow-x: auto; border-radius: 3px; margin: 0 0 14px;
+  }
+  pre .pozn { color: #8aa0b4; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  li { margin-bottom: 5px; }
+  .ramecek { border-left: 4px solid var(--modra); background: #f4f9fd; padding: 12px 14px; margin: 0 0 14px; }
+  .ramecek.pozor { border-left-color: var(--zluta); background: #fffaf0; }
+  .ramecek.varovani { border-left-color: var(--cervena); background: #fdf4f4; }
+  .ramecek strong { display: block; margin-bottom: 3px; }
+  .kroky { counter-reset: k; list-style: none; padding: 0; }
+  .kroky > li { counter-increment: k; position: relative; padding-left: 36px; margin-bottom: 18px; }
+  .kroky > li::before {
+    content: counter(k); position: absolute; left: 0; top: 0;
+    width: 24px; height: 24px; line-height: 24px; text-align: center;
+    background: var(--modra); color: #fff; border-radius: 12px; font-size: 13px; font-weight: 700;
+  }
+  .kroky h3 { margin-top: 0; }
+  footer { max-width: 960px; margin: 0 auto; padding: 0 24px 40px; color: var(--text-slaby); font-size: 13px; }
+  .dve { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 24px; }
+  @media (max-width: 700px) { td.soucet { font-size: 10px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="obal">
+    <h1>Vlastní zjednodušená obdoba Active Directory</h1>
+    <p>
+      Školní projekt v Rustu: doménový server a klient, které si všechno dělají samy.
+      Žádná Samba AD, žádné Microsoft AD DS, žádné sssd. Vzhledem a postupem se to
+      podobá Správci serveru z Windows Serveru, uvnitř je to vlastní kód.
+    </p>
+    <span class="verze">verze @@VERZE@@ &middot; sestaveno @@DATUM@@ &middot; @@COMMIT@@</span>
+  </div>
+</header>
+
+<main>
+
+<section>
+  <h2>Ke stažení</h2>
+  <div>
+    <table>
+      <thead>
+        <tr><th>Soubor</th><th>Pro koho</th><th>Velikost</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>ad-server.exe</code></td>
+          <td>Windows — řadič domény</td>
+          <td>@@VELIKOST_SERVER_WIN@@</td>
+          <td><a class="stahnout" href="@@ZAKLAD@@ad-server.exe">Stáhnout</a></td>
+        </tr>
+        <tr><td colspan="4" class="soucet">SHA-256: @@SHA_SERVER_WIN@@</td></tr>
+        <tr>
+          <td><code>ad-client.exe</code></td>
+          <td>Windows — klient</td>
+          <td>@@VELIKOST_KLIENT_WIN@@</td>
+          <td><a class="stahnout" href="@@ZAKLAD@@ad-client.exe">Stáhnout</a></td>
+        </tr>
+        <tr><td colspan="4" class="soucet">SHA-256: @@SHA_KLIENT_WIN@@</td></tr>
+        <tr>
+          <td><code>ad-server-linux</code></td>
+          <td>Debian, Void a jiné (statické, bez závislostí)</td>
+          <td>@@VELIKOST_SERVER_LINUX@@</td>
+          <td><a class="stahnout" href="@@ZAKLAD@@ad-server-linux">Stáhnout</a></td>
+        </tr>
+        <tr><td colspan="4" class="soucet">SHA-256: @@SHA_SERVER_LINUX@@</td></tr>
+        <tr>
+          <td><code>ad-client-linux</code></td>
+          <td>Debian, Void a jiné (statické, bez závislostí)</td>
+          <td>@@VELIKOST_KLIENT_LINUX@@</td>
+          <td><a class="stahnout" href="@@ZAKLAD@@ad-client-linux">Stáhnout</a></td>
+        </tr>
+        <tr><td colspan="4" class="soucet">SHA-256: @@SHA_KLIENT_LINUX@@</td></tr>
+        <tr>
+          <td><code>SHA256SUMS</code></td>
+          <td>součty všech souborů v jednom textu</td>
+          <td>@@VELIKOST_SUMS@@</td>
+          <td><a class="stahnout" href="@@ZAKLAD@@SHA256SUMS">Stáhnout</a></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Ověř, že jsi stáhl to, co tu je napsané</h3>
+    <p>
+      Kontrolní součet pozná, že se soubor cestou nezměnil. Když nesedí,
+      soubor nespouštěj.
+    </p>
+    <div class="dve">
+      <div>
+        <p><strong>Linux</strong></p>
+        <pre>sha256sum ad-server-linux
+<span class="pozn"># nebo rovnou všechno naráz:</span>
+sha256sum -c SHA256SUMS</pre>
+      </div>
+      <div>
+        <p><strong>Windows (PowerShell)</strong></p>
+        <pre>Get-FileHash .\ad-server.exe -Algorithm SHA256</pre>
+      </div>
+    </div>
+    <div class="ramecek pozor">
+      <strong>Součet sám o sobě nedokazuje, že je program bezpečný.</strong>
+      Dokazuje jen to, že se shoduje se souborem, který vznikl při sestavení.
+      Kdo nevěří téhle stránce, ať si projekt přeloží ze zdrojového kódu —
+      postup je v <a href="@@REPO@@">repozitáři</a>.
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Co to umí</h2>
+  <div>
+    <div class="dve">
+      <div>
+        <h3>Server</h3>
+        <ul>
+          <li>vlastní databáze domény v SQLite: uživatelé, skupiny, organizační jednotky, počítače</li>
+          <li>komunikace s klienty přes TLS, hesla uložená pomocí Argon2id</li>
+          <li>vlastní DNS server: dopředná i reverzní zóna, záznamy A, PTR, SRV, přeposílání dál</li>
+          <li>zásady skupiny: pravidla hesel, zamykání účtu, uvítací zpráva, tapeta</li>
+          <li>webová správa ve stylu Správce serveru, zabalená přímo v programu</li>
+          <li>běh jako služba: Windows Service, systemd, runit</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Klient</h3>
+        <ul>
+          <li>připojení do domény s kontrolou otisku certifikátu</li>
+          <li>záloha původního nastavení DNS a přepnutí na doménový server</li>
+          <li>přihlášení doménového uživatele <em>v programu</em> a stažení zásad</li>
+          <li>změna hesla</li>
+          <li>odpojení, které vrátí všechno do původního stavu</li>
+        </ul>
+      </div>
+    </div>
+    <div class="ramecek">
+      <strong>Co projekt záměrně nedělá</strong>
+      Nezasahuje do přihlašování do systému (Credential Provider, PAM) a není
+      kompatibilní se skutečným Active Directory — žádné LDAP, Kerberos ani SMB.
+      Je to vlastní protokol a vlastní databáze.
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Návod: od staženého souboru k funkční doméně</h2>
+  <div>
+    <ol class="kroky">
+      <li>
+        <h3>Připrav server</h3>
+        <p>
+          Server potřebuje pevnou IP adresu a volný port 53 pro DNS.
+          Na Debianu ho obvykle drží <code>systemd-resolved</code>:
+        </p>
+        <pre>sudo systemctl disable --now systemd-resolved
+sudo rm -f /etc/resolv.conf
+echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf</pre>
+      </li>
+
+      <li>
+        <h3>Nainstaluj server jako službu</h3>
+        <pre>chmod +x ad-server-linux
+sudo cp ad-server-linux /usr/local/bin/ad-server
+
+<span class="pozn"># nejdřív se podívej, co to udělá — bez --yes se nic nestane</span>
+sudo ad-server install-service
+sudo ad-server install-service --yes</pre>
+        <p>
+          Na Windows spusť příkazový řádek jako správce a použij
+          <code>ad-server.exe install-service --yes</code>.
+          Server se dá spustit i bez instalace služby:
+          <code>ad-server --data-dir ./data run</code>.
+        </p>
+      </li>
+
+      <li>
+        <h3>Otevři správu a vytvoř doménu</h3>
+        <p>
+          Správa poslouchá jen na <code>127.0.0.1:8080</code>. Na serveru bez
+          grafiky se k ní dostaneš tunelem ze svého počítače:
+        </p>
+        <pre>ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
+<span class="pozn"># pak v prohlížeči: http://127.0.0.1:8080</span></pre>
+        <p>
+          Při prvním spuštění server vypíše jednorázový token — tím se přihlásíš.
+          Pak projdi <em>Přidat role a funkce</em> a <em>Povýšit server na řadič
+          domény</em>. Jméno domény zvol s koncovkou <code>.internal</code>,
+          ne <code>.local</code>.
+        </p>
+      </li>
+
+      <li>
+        <h3>Opiš si otisk certifikační autority</h3>
+        <p>
+          Najdeš ho ve správě v části <em>Místní server</em>. Klient ho potřebuje,
+          aby poznal, že mluví se správným serverem — bez něj se připojit nedá.
+        </p>
+      </li>
+
+      <li>
+        <h3>Připoj klienta</h3>
+        <pre>chmod +x ad-client-linux
+sudo cp ad-client-linux /usr/local/bin/ad-client
+
+sudo ad-client join --server 192.168.56.10 \
+     --fingerprint A1:B2:...:FF --admin administrator
+
+ad-client logon --user jan.novak   <span class="pozn"># přihlášení v programu</span>
+ad-client status                   <span class="pozn"># stav, DNS, zásady</span>
+sudo ad-client leave               <span class="pozn"># odpojení a návrat DNS</span></pre>
+        <p>
+          Na Windows totéž v příkazovém řádku spuštěném jako správce
+          (<code>ad-client.exe join …</code>).
+        </p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h2>Na co si dát pozor</h2>
+  <div>
+    <div class="ramecek varovani">
+      <strong>Tohle je školní projekt, ne hotový produkt.</strong>
+      Nasazuj ho ve zkušební síti nebo ve virtuálkách, ne tam, kde na něm něco závisí.
+      Má jen jeden řadič, takže když spadne, doména nefunguje.
+    </div>
+    <ul>
+      <li>
+        <strong>Otisk certifikátu opiš přesně.</strong> Je to jediná věc, podle které
+        klient pozná podvržený server. Klient ho ověří dřív, než odešle heslo správce.
+      </li>
+      <li>
+        <strong>Heslo správce domény je jediná překážka</strong> k ovládnutí domény —
+        dvoufaktorové přihlášení tu není.
+      </li>
+      <li>
+        <strong>Správa poslouchá jen na loopbacku.</strong> Vzdáleně k ní přistupuj
+        SSH tunelem, ne tím, že ji vystavíš do sítě.
+      </li>
+      <li>
+        <strong>Nic se neinstaluje bez souhlasu</strong> a všechno jde odinstalovat:
+        <code>ad-server uninstall-service --yes</code> a smazání datového adresáře.
+      </li>
+      <li>
+        <strong>Žádná telemetrie.</strong> Programy nikam neposílají data o tobě
+        ani o síti.
+      </li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Zdrojový kód, dokumentace a postup testování ve virtuálkách:
+  <a href="@@REPO@@">@@REPO@@</a><br>
+  Sestaveno z revize <code>@@COMMIT_PLNY@@</code>. Licence MIT.
+</footer>
+
+</body>
+</html>

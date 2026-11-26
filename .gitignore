@@ -1,6 +1,5 @@
 /target
 **/*.rs.bk
-/dist
 /data
 *.db
 *.db-wal
@@ -13,7 +12,13 @@ data-test/
 data-test-dns/
 data-test-klient/
 data-test-sluzba/
+
+# Výsledky sestavení vydání. Šablona index.template.html se verzuje,
+# vygenerovaná stránka a binárky ne.
 dist/soubory/
-dist/ad-*
+dist/ad-server.exe
+dist/ad-client.exe
+dist/ad-server-linux
+dist/ad-client-linux
 dist/SHA256SUMS
 dist/index.html
