@@ -8,3 +8,5 @@
 *.pem
 *.key
 setup-token.txt
+data-test-ui/
+data-test/

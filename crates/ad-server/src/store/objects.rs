@@ -457,7 +457,13 @@ impl Store {
         }
 
         match (q.ou_id, q.scope) {
+            // Bez `ou_id` se nefiltruje podle umístění vůbec — to je
+            // potřeba pro hledání napříč doménou.
             (None, _) => {}
+            // `ou_id=0` znamená „přímo pod doménou“. Nula není platné id
+            // žádné OU, takže se nedá splést s existující jednotkou,
+            // a v SQL se `ou_id IS NULL` jinak zapsat nedá.
+            (Some(0), _) => casti.push("ou_id IS NULL".to_string()),
             (Some(id), Scope::Level) => {
                 casti.push(format!("ou_id = ?{}", hodnoty.len() + 1));
                 hodnoty.push(Box::new(id));
@@ -781,9 +787,13 @@ impl Store {
             ));
             hodnoty.push(Box::new(vzor));
         }
-        if let Some(ou) = q.ou_id {
-            casti.push(format!("ou_id = ?{}", hodnoty.len() + 1));
-            hodnoty.push(Box::new(ou));
+        match q.ou_id {
+            None => {}
+            Some(0) => casti.push("ou_id IS NULL".to_string()),
+            Some(ou) => {
+                casti.push(format!("ou_id = ?{}", hodnoty.len() + 1));
+                hodnoty.push(Box::new(ou));
+            }
         }
         let kde = if casti.is_empty() { "1 = 1".to_string() } else { casti.join(" AND ") };
 
@@ -865,6 +875,58 @@ impl Store {
         let c = self.lock();
         c.execute("DELETE FROM groups WHERE id = ?1", [id]).map_err(db_chyba)?;
         Ok(g.name)
+    }
+
+    pub fn uprav_skupinu(
+        &self,
+        id: i64,
+        jmeno: Option<&str>,
+        popis: Option<&str>,
+    ) -> Result<Group> {
+        let stara = self.skupina(id)?;
+        if stara.builtin && jmeno.is_some() {
+            return Err(AdError::conflict("vestavěná skupina se nedá přejmenovat"));
+        }
+        let nove_jmeno = match jmeno {
+            Some(j) => names::validuj_jmeno_objektu(j)?,
+            None => stara.name.clone(),
+        };
+        let novy_popis = match popis {
+            Some(p) => names::validuj_popis(p)?,
+            None => stara.description.clone(),
+        };
+        let c = self.lock();
+        c.execute(
+            "UPDATE groups SET name = ?1, description = ?2 WHERE id = ?3",
+            params![nove_jmeno, novy_popis, id],
+        )
+        .map_err(db_chyba)?;
+        drop(c);
+        self.skupina(id)
+    }
+
+    pub fn presun_skupinu(&self, id: i64, ou: Option<i64>) -> Result<Group> {
+        if let Some(o) = ou {
+            self.ou(o)?;
+        }
+        self.skupina(id)?;
+        let c = self.lock();
+        c.execute("UPDATE groups SET ou_id = ?1 WHERE id = ?2", params![ou, id])
+            .map_err(db_chyba)?;
+        drop(c);
+        self.skupina(id)
+    }
+
+    pub fn presun_pocitac(&self, id: i64, ou: Option<i64>) -> Result<Computer> {
+        if let Some(o) = ou {
+            self.ou(o)?;
+        }
+        self.pocitac(id)?;
+        let c = self.lock();
+        c.execute("UPDATE computers SET ou_id = ?1 WHERE id = ?2", params![ou, id])
+            .map_err(db_chyba)?;
+        drop(c);
+        self.pocitac(id)
     }
 
     pub fn clenove(&self, group_id: i64) -> Result<Vec<GroupMember>> {
@@ -1118,9 +1180,13 @@ impl Store {
             ));
             hodnoty.push(Box::new(vzor));
         }
-        if let Some(ou) = q.ou_id {
-            casti.push(format!("ou_id = ?{}", hodnoty.len() + 1));
-            hodnoty.push(Box::new(ou));
+        match q.ou_id {
+            None => {}
+            Some(0) => casti.push("ou_id IS NULL".to_string()),
+            Some(ou) => {
+                casti.push(format!("ou_id = ?{}", hodnoty.len() + 1));
+                hodnoty.push(Box::new(ou));
+            }
         }
         let kde = if casti.is_empty() { "1 = 1".to_string() } else { casti.join(" AND ") };
         let c = self.lock();

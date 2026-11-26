@@ -18,7 +18,7 @@ use axum::{Json, Router};
 
 pub fn routes() -> Router<Stav> {
     Router::new()
-        .route("/", get(rozcestnik))
+        .route("/admin/api/v1/hello", get(hello))
         .route("/admin/api/v1/session", post(prihlas).delete(odhlas))
         .route("/admin/api/v1/me", get(kdo_jsem))
         .route("/admin/api/v1/status", get(stav_serveru))
@@ -44,7 +44,11 @@ pub fn routes() -> Router<Stav> {
         .route("/admin/api/v1/users/{id}/groups", get(skupiny_uzivatele))
         // skupiny
         .route("/admin/api/v1/groups", get(seznam_skupin).post(vytvor_skupinu))
-        .route("/admin/api/v1/groups/{id}", get(skupina_detail).delete(smaz_skupinu))
+        .route(
+            "/admin/api/v1/groups/{id}",
+            get(skupina_detail).patch(uprav_skupinu).delete(smaz_skupinu),
+        )
+        .route("/admin/api/v1/groups/{id}/move", post(presun_skupinu))
         .route(
             "/admin/api/v1/groups/{id}/members",
             get(clenove).post(pridej_cleny).delete(odeber_cleny),
@@ -52,6 +56,7 @@ pub fn routes() -> Router<Stav> {
         // počítače
         .route("/admin/api/v1/computers", get(seznam_pocitacu))
         .route("/admin/api/v1/computers/{id}", get(pocitac_detail).delete(smaz_pocitac))
+        .route("/admin/api/v1/computers/{id}/move", post(presun_pocitac))
         // zásady
         .route("/admin/api/v1/gpos", get(seznam_gpo).post(vytvor_gpo))
         .route("/admin/api/v1/gpos/effective", get(efektivni_zasada))
@@ -66,6 +71,48 @@ pub fn routes() -> Router<Stav> {
         .route("/admin/api/v1/dns/zones/{id}", get(zona_detail).delete(smaz_zonu))
         .route("/admin/api/v1/dns/zones/{id}/records", get(zaznamy).post(vytvor_zaznam))
         .route("/admin/api/v1/dns/records/{id}", delete(smaz_zaznam))
+        // Webové rozhraní zabalené v binárce. Musí být poslední —
+        // bere na sebe všechny ostatní cesty.
+        .fallback(super::web::soubor)
+}
+
+/// `GET /admin/api/v1/hello` — bez přihlášení, jen z loopbacku.
+///
+/// Přihlašovací obrazovka potřebuje vědět, jestli se má ptát na
+/// jednorázový token, nebo na doménový účet. Proto tenhle jeden
+/// koncový bod přihlášení nevyžaduje. Neprozrazuje nic, co by se
+/// nedalo zjistit tím, že se server pokusíš použít.
+async fn hello(State(stav): State<Stav>) -> Odpoved<Json<AdminHello>> {
+    let store = stav.store.clone();
+    Ok(Json(
+        blok(move || {
+            let stage = store.stav()?;
+            let domena = store.domena()?;
+            Ok(AdminHello {
+                product: PRODUKT.to_string(),
+                version: ad_core::VERZE.to_string(),
+                stage,
+                domain_dns_name: domena.as_ref().map(|d| d.dns_name.clone()),
+                domain_short_name: domena.as_ref().map(|d| d.short_name.clone()),
+                setup_token_active: store
+                    .nastaveni(crate::store::schema::nastaveni::SETUP_TOKEN_HASH)?
+                    .is_some(),
+            })
+        })
+        .await?,
+    ))
+}
+
+/// Co vidí přihlašovací obrazovka.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AdminHello {
+    pub product: String,
+    pub version: String,
+    pub stage: ServerStage,
+    pub domain_dns_name: Option<String>,
+    pub domain_short_name: Option<String>,
+    /// Platí ještě jednorázový token pro první přihlášení?
+    pub setup_token_active: bool,
 }
 
 // =======================================================================
@@ -236,27 +283,6 @@ async fn smaz_zaznam(
     Ok(Json(Ok2::default()))
 }
 
-/// Dokud není webové rozhraní (fáze 3), ať je na `/` aspoň rozcestník.
-async fn rozcestnik(State(stav): State<Stav>) -> impl IntoResponse {
-    let s = stav.store.stav().unwrap_or(ServerStage::Fresh);
-    let text = format!(
-        "ad-server {verze}\n\n\
-         Stav serveru: {s:?}\n\
-         Webové rozhraní přijde ve fázi 3. Teď se dá server ovládat\n\
-         přes správní API:\n\n\
-         POST   /admin/api/v1/session            přihlášení\n\
-         GET    /admin/api/v1/status             přehled\n\
-         POST   /admin/api/v1/roles              přidat role\n\
-         POST   /admin/api/v1/promote/precheck   kontrola předpokladů\n\
-         POST   /admin/api/v1/promote            vytvořit doménu\n\
-         GET    /admin/api/v1/users              uživatelé\n\n\
-         Doménové API pro klienty je na portu {tls} přes TLS.\n",
-        verze = ad_core::VERZE,
-        tls = ad_core::proto::PORT_TLS,
-    );
-    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text)
-}
-
 // =======================================================================
 // Přihlášení
 // =======================================================================
@@ -358,8 +384,30 @@ async fn odhlas(
     Ok((hlavicky, Json(Ok2::default())))
 }
 
-async fn kdo_jsem(spravce: Spravce) -> Odpoved<Json<AdminPrincipal>> {
-    Ok(Json(spravce.principal))
+/// `GET /admin/api/v1/me` — kdo je přihlášený, včetně CSRF tokenu.
+///
+/// Token se vrací schválně: po obnovení stránky ho prohlížeč v paměti
+/// nemá a bez něj by se nedalo nic změnit. Cizí stránka si odpověď
+/// přečíst nemůže — neposíláme žádné hlavičky CORS, takže ji prohlížeč
+/// nepustí k obsahu. Session cookie má navíc `SameSite=Strict`.
+async fn kdo_jsem(
+    State(stav): State<Stav>,
+    spravce: Spravce,
+) -> Odpoved<Json<AdminSessionResponse>> {
+    let store = stav.store.clone();
+    let token = spravce.session_token.clone();
+    let principal = spravce.principal.clone();
+    let session = blok(move || {
+        store
+            .session(&token)?
+            .ok_or_else(|| AdError::new(ErrorCode::SessionExpired, "přihlášení vypršelo"))
+    })
+    .await?;
+    Ok(Json(AdminSessionResponse {
+        principal,
+        csrf_token: session.1,
+        expires_at: ad_core::nyni() + time::Duration::minutes(PLATNOST_SESSION_MIN),
+    }))
 }
 
 // =======================================================================
@@ -387,7 +435,7 @@ async fn stav_serveru(State(stav): State<Stav>, _s: Spravce) -> Odpoved<Json<Sta
                 title: "Přidat role a funkce".into(),
                 detail: "Server zatím nemá žádnou roli. Začni průvodcem Přidat role a funkce."
                     .into(),
-                action: Some("#/roles".into()),
+                action: Some("#/role".into()),
             }),
             ServerStage::RolesInstalled => {
                 if role.directory {
@@ -397,7 +445,7 @@ async fn stav_serveru(State(stav): State<Stav>, _s: Spravce) -> Odpoved<Json<Sta
                         title: "Povýšit server na řadič domény".into(),
                         detail: "Role doménových služeb je nainstalovaná, doména ještě není."
                             .into(),
-                        action: Some("#/promote".into()),
+                        action: Some("#/povyseni".into()),
                     });
                 }
                 if !role.dns {
@@ -406,7 +454,7 @@ async fn stav_serveru(State(stav): State<Stav>, _s: Spravce) -> Odpoved<Json<Sta
                         level: AlertLevel::Info,
                         title: "Role DNS není nainstalovaná".into(),
                         detail: "Bez DNS si klienti doménu nenajdou podle jména.".into(),
-                        action: Some("#/roles".into()),
+                        action: Some("#/role".into()),
                     });
                 }
             }
@@ -418,7 +466,7 @@ async fn stav_serveru(State(stav): State<Stav>, _s: Spravce) -> Odpoved<Json<Sta
                         title: format!("Zamčené účty: {}", pocty.locked_users),
                         detail: "Účty se odemknou samy po uplynutí doby, nebo je odemkni ručně."
                             .into(),
-                        action: Some("#/users?locked=1".into()),
+                        action: Some("#/uzivatele?zamcene=1".into()),
                     });
                 }
                 if pocty.computers == 0 {
@@ -903,6 +951,47 @@ async fn smaz_skupinu(
     })
     .await?;
     Ok(Json(Ok2::default()))
+}
+
+#[derive(serde::Deserialize)]
+struct UpravSkupinu {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+async fn uprav_skupinu(
+    State(stav): State<Stav>,
+    _s: Spravce,
+    Path(id): Path<i64>,
+    Telo(req): Telo<UpravSkupinu>,
+) -> Odpoved<Json<Group>> {
+    let store = stav.store.clone();
+    Ok(Json(
+        blok(move || store.uprav_skupinu(id, req.name.as_deref(), req.description.as_deref()))
+            .await?,
+    ))
+}
+
+async fn presun_skupinu(
+    State(stav): State<Stav>,
+    _s: Spravce,
+    Path(id): Path<i64>,
+    Telo(req): Telo<MoveRequest>,
+) -> Odpoved<Json<Group>> {
+    let store = stav.store.clone();
+    Ok(Json(blok(move || store.presun_skupinu(id, req.target_ou_id)).await?))
+}
+
+async fn presun_pocitac(
+    State(stav): State<Stav>,
+    _s: Spravce,
+    Path(id): Path<i64>,
+    Telo(req): Telo<MoveRequest>,
+) -> Odpoved<Json<Computer>> {
+    let store = stav.store.clone();
+    Ok(Json(blok(move || store.presun_pocitac(id, req.target_ou_id)).await?))
 }
 
 async fn clenove(

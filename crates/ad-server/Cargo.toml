@@ -15,10 +15,12 @@ workspace = true
 [dependencies]
 ad-core = { version = "0.1.0", path = "../ad-core" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query", "tower-log"] }
+hex = "0.4.3"
 hyper = { version = "1.13.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio", "server", "server-graceful", "http1"] }
 rcgen = "0.14.7"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+rust-embed = "8.14.0"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "logging", "tls12", "std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

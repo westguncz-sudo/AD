@@ -82,7 +82,7 @@ ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
 | Fáze | Test |
 |---|---|
 | 2 | `curl` proti `/api/v1/hello`, vytvoření domény, přihlášení, restart serveru a kontrola, že data zůstala |
-| 3 | prohlížeč: dashboard → role → povýšení → správa uživatelů |
+| 3 | `bash docs/test-faze3.sh`, nebo ručně v prohlížeči: přehled → role → povýšení → nástroje |
 | 4 | `dig @192.168.56.10 dc01.skola.internal`, `dig -x 192.168.56.10`, `dig _ad._tcp.skola.internal SRV`, `dig seznam.cz` (forwarder) |
 | 5 | `ad-client join` na obou klientech, přihlášení uživatele, změna zásady a její dopad, `ad-client leave` a kontrola, že `/etc/resolv.conf` je zpátky |
 | 6 | restart virtuálky — služba se spustí sama; `systemctl status`, `sv status`, `Get-Service` |

@@ -83,6 +83,16 @@ Každý požadavek, který něco mění (POST, PUT, PATCH, DELETE), musí mít
 hlavičku `X-AD-CSRF: <csrf_token>`. Server navíc kontroluje `Origin`
 nebo `Referer` proti vlastní adrese. Čtení (GET) CSRF token nepotřebuje.
 
+Po obnovení stránky prohlížeč token v paměti nemá, ale cookie platí dál.
+Token se proto vrací i z `GET /me`. Není to díra: cizí stránka si
+odpověď přečíst nemůže (neposíláme žádné hlavičky CORS) a cookie má
+`SameSite=Strict`.
+
+V seznamech znamená `ou_id=0` „přímo pod doménou". Nula není platné id
+žádné organizační jednotky, takže se nedá splést — a `ou_id IS NULL`
+se v dotazu jinak zapsat nedá. Vynechané `ou_id` znamená „kdekoli
+v doméně" a používá se při hledání.
+
 ### První přihlášení, než doména existuje
 
 Čerstvý server žádné účty nemá. Při prvním startu vypíše do konzole
@@ -259,8 +269,9 @@ Dostupné jen z `127.0.0.1`. Měnící akce potřebují `X-AD-CSRF`.
 
 | Metoda | Cesta | Co dělá |
 |---|---|---|
+| GET | `/hello` | **bez přihlášení**: verze, stav serveru, jméno domény |
 | POST/DELETE | `/session` | přihlášení, odhlášení |
-| GET | `/me` | kdo je přihlášený |
+| GET | `/me` | kdo je přihlášený + CSRF token |
 | GET | `/status` | vše pro dashboard na jeden dotaz |
 | POST | `/roles` | „Přidat role a funkce“ — vyžaduje `consent: true` |
 | POST | `/promote/precheck` | kontrola předpokladů |
@@ -357,7 +368,7 @@ Stav po fázi 2 — co je hotové a co ještě ne:
 | správní API: session, status, roles, promote, demote, audit | hotovo |
 | správní API: OU, uživatelé, skupiny, počítače, zásady, DNS data | hotovo |
 | nahrání tapety (`POST /assets`) | fáze 5 |
-| webové rozhraní nad tím | fáze 3 |
+| webové rozhraní nad tím | hotovo |
 | vlastní DNS server na portu 53 | fáze 4 |
 
 ## 7. Příklady na vyzkoušení

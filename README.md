@@ -12,8 +12,8 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 | Fáze | Co | Stav |
 |---|---|---|
 | 1 | architektura, protokol, sdílené jádro `ad-core` | hotovo |
-| **2** | server: SQLite, doména, uživatelé, přihlášení, TLS | **hotovo, k otestování** |
-| 3 | webová správa (dashboard, průvodci, nástroje) | čeká |
+| 2 | server: SQLite, doména, uživatelé, přihlášení, TLS | hotovo |
+| **3** | webová správa (dashboard, průvodci, nástroje) | **hotovo, k otestování** |
 | 4 | vlastní DNS server | čeká |
 | 5 | klient a zásady | čeká |
 | 6 | služby: Windows Service, systemd, runit | čeká |
@@ -51,9 +51,18 @@ crates/
     src/domain.rs          kontrola předpokladů, povýšení, zrušení domény
     src/store/             SQLite: schéma, objekty, přihlašování, zásady, DNS
     src/http/              axum: správní API, doménové API, CSRF, chyby
+    web/                   webové rozhraní zabalené do binárky
+      index.html           kostra stránky
+      css/app.css          vzhled podle Správce serveru
+      js/jadro.js          API, DOM, dialogy, formátování
+      js/app.js            přihlášení, rám, navigace, směrování
+      js/pruvodce.js       rám průvodce (kroky vlevo, tlačítka dole)
+      js/pohledy.js        přehled, místní server, oba průvodci, audit
+      js/nastroje.js       uživatelé a počítače, DNS, zásady skupiny
   ad-client/               klient (fáze 5)
 docs/
-  test-faze2.sh            automatický test fáze 2 na jednom stroji
+  test-faze2.sh            automatický test serveru (85 kontrol)
+  test-faze3.sh            automatický test rozhraní v prohlížeči (76 kontrol)
 ```
 
 Proč jedno sdílené jádro: kdyby měl server a klient každý svoji kopii
@@ -96,6 +105,62 @@ target/x86_64-pc-windows-gnu/release/ad-client.exe
 
 Linuxové verze jsou staticky slinkované (`static-pie`), takže běží na
 Debianu i na Void Linuxu bez instalace knihoven.
+
+## Test fáze 3
+
+Webové rozhraní se testuje v prohlížeči. Test se proklikne celým
+postupem jako člověk a cestou ukládá snímky obrazovky:
+
+```bash
+cargo build -p ad-server
+
+# jednou: Playwright a prohlížeč pro něj
+npm install -g playwright && npx playwright install chromium
+
+bash docs/test-faze3.sh
+```
+
+Snímky obrazovky skončí v `data-test-ui/snimky/` — hodí se do
+dokumentace k projektu.
+
+### Ručně
+
+```bash
+cargo run -p ad-server -- --data-dir ./data run
+# a v prohlížeči: http://127.0.0.1:8080
+```
+
+Na serveru bez grafiky přes SSH tunel z vlastního počítače:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
+# pak v prohlížeči na svém stroji: http://127.0.0.1:8080
+```
+
+Postup v rozhraní je stejný jako ve Windows Serveru:
+
+1. **Přihlášení** jednorázovým tokenem z konzole (vypíše se při prvním spuštění).
+2. **Přehled** — uvítací panel s číslovaným rychlým startem a vlaječka
+   upozornění vpravo nahoře.
+3. **Spravovat → Přidat role a funkce** — průvodce v šesti krocích,
+   role se nenainstalují bez zatrženého souhlasu.
+4. Upozornění **„Povýšit server na řadič domény"**.
+5. **Konfigurační průvodce** — jméno domény, řadič, DNS, souhrn,
+   kontrola předpokladů (12 položek `pass`/`warn`/`fail`), instalace.
+6. **Nástroje** — Uživatelé a počítače (strom vlevo, seznam vpravo),
+   Správce DNS, Správa zásad skupiny, Auditní log.
+
+Co zkusit naschvál špatně:
+
+| Zkus | Co se stane |
+|---|---|
+| doména `skola.local` | průvodce nepustí dál už v prohlížeči |
+| jméno domény s diakritikou | totéž |
+| heslo `heslo` u nového uživatele | server vypíše, která pravidla chybí |
+| potvrzení instalace rolí bez zatržení souhlasu | tlačítko Instalovat je zakázané |
+| zásada s neznámým polem (přes `curl`) | `400 bad_request` |
+| `fetch` bez hlavičky `x-ad-csrf` z konzole prohlížeče | `403 csrf_failed` |
+| `document.cookie` v konzoli prohlížeče | session cookie není vidět (HttpOnly) |
 
 ## Test fáze 2
 

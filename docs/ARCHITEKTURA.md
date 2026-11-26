@@ -107,6 +107,48 @@ Pozor na pořadí: certifikát vzniká až při vytvoření domény. Se
 odmítne nastartovat a řekne to. Postup je: vytvoř doménu s `tls = false`,
 pak přepni na `true` a restartuj.
 
+## 3a. Webové rozhraní
+
+HTML, CSS i JavaScript jsou **uvnitř binárky** (`rust-embed`, adresář
+`crates/ad-server/web/`). Server je tím pádem jeden soubor a rozhraní
+funguje i na stroji bez internetu. V debug sestavení se soubory čtou
+z disku, takže se dají upravovat bez překladu.
+
+Žádný framework, žádná knihovna ze sítě. Důvod není puritánství:
+hlavička `Content-Security-Policy` je nastavená na `default-src 'self'`
+bez `unsafe-inline`, takže by se nic cizího stejně nenačetlo — a zároveň
+to znamená, že do stránky nejde propašovat skript.
+
+```
+index.html        kostra: přihlášení, hlavička, navigace, místo pro obsah
+css/app.css       vzhled, ikony kreslené v SVG (žádná loga Microsoftu)
+js/jadro.js       volání API, stavba DOM, dialogy, hlášení, formátování
+js/app.js         přihlášení, nabídky, vlaječka upozornění, směrování
+js/pruvodce.js    rám průvodce: kroky vlevo, obsah vpravo, tlačítka dole
+js/pohledy.js     Přehled, Místní server, oba průvodci, Auditní log
+js/nastroje.js    Uživatelé a počítače, Správce DNS, Zásady skupiny
+```
+
+Pravidla, která v rozhraní platí:
+
+* **Text se vkládá jen přes `textContent`**, nikdy `innerHTML`. Jména
+  uživatelů, popisy a hlavně to, co o sobě tvrdí klient (jméno systému),
+  jsou cizí text a nesmí se chovat jako HTML. Hlídá to i pravidlo
+  v `eslint.config.mjs`.
+* **Žádné `onclick=` v HTML** — CSP by je stejně zakázala. Posluchače
+  přidává `el()`.
+* **CSRF token se drží jen v paměti stránky**, nikdy v `localStorage`.
+  Po obnovení stránky se znovu vyzvedne z `GET /me`; cizí stránka si
+  tu odpověď přečíst nemůže, protože neposíláme žádné hlavičky CORS.
+* **Validace se dělá dvakrát.** Prohlížeč zkontroluje jméno domény,
+  jméno řadiče a IP adresu hned (`jadro.js`), aby uživatel nečekal na
+  odpověď. Rozhoduje ale vždycky server — kontrola v prohlížeči je
+  pohodlí, ne ochrana.
+* **Stav serveru se načítá před každým vykreslením stránky.** Průvodci
+  stav mění, takže navazující stránka musí vidět, co platí teď. (Tohle
+  byla chyba, kterou našel až test v prohlížeči: po instalaci rolí
+  tvrdil konfigurační průvodce, že role chybí.)
+
 ## 4. Kde co leží
 
 | | Windows | Debian / Void |

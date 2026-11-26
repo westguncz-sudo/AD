@@ -144,6 +144,21 @@ Session cookie má `HttpOnly` (nedostane se k ní skript), `SameSite=Strict`
 (brání tomu Same-Origin Policy) a hlavičku si při jednoduchém požadavku
 nepřidá. Server kontroluje i `Origin`.
 
+### Webové rozhraní: nic se nenačítá zvenčí
+
+Rozhraní je celé v binárce a hlavička `Content-Security-Policy` je
+`default-src 'self'` bez `unsafe-inline` a `unsafe-eval`. Prohlížeč tedy
+nenačte skript ani styl odjinud a nespustí nic vloženého do stránky.
+K tomu `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
+(stránka nejde vložit do rámce, takže ani clickjacking) a
+`Referrer-Policy: no-referrer`.
+
+Do stránky se text vkládá výhradně přes `textContent`. Nejnebezpečnější
+údaj je jméno operačního systému, které o sobě hlásí klient — je to
+cizí text a kdyby se vložil jako HTML, stačilo by připojit počítač se
+jménem systému `<img onerror=…>` a skript by běžel v prohlížeči správce.
+Zákaz `innerHTML` hlídá pravidlo v `eslint.config.mjs`.
+
 ### SQL
 
 Všechny dotazy jsou parametrizované (`rusqlite` `?1`, `?2`). Jména se

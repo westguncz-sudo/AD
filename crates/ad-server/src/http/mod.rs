@@ -10,6 +10,7 @@ pub mod admin;
 pub mod domain_api;
 pub mod error;
 pub mod extract;
+pub mod web;
 
 use crate::config::{Cesty, Config};
 use crate::store::Store;
