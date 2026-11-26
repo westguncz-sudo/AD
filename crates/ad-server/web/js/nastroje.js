@@ -851,16 +851,30 @@ export async function spravceDns(kontejner) {
     el('dl', { class: 'vlastnosti' },
       el('dt', { text: 'Poslouchá' }),
       el('dd', {}, el('span', {
-        class: 'odznacek ' + (dnsStav.running ? 'zapnuto' : 'vypnuto'),
-        text: dnsStav.running ? 'ano' : 'ne — přijde ve fázi 4',
+        class: 'odznacek ' + (dnsStav.running ? 'zapnuto' : 'zamceno'),
+        text: dnsStav.running ? 'ano' : 'ne',
       })),
-      el('dt', { text: 'Adresa' }), el('dd', { class: 'mono', text: (dnsStav.listen || []).join(', ') }),
+      el('dt', { text: 'Adresa' }),
+      el('dd', { class: 'mono', text: (dnsStav.listen || []).join(', ') }),
       el('dt', { text: 'Dotazů celkem' }), el('dd', { text: String(dnsStav.queries_total) }),
+      el('dt', { text: 'Z našich zón' }),
+      el('dd', { text: String(dnsStav.queries_authoritative ?? 0) }),
       el('dt', { text: 'Přeposláno' }), el('dd', { text: String(dnsStav.queries_forwarded) }),
-      el('dt', { text: 'Odmítnuto' }), el('dd', { text: String(dnsStav.queries_refused) })),
-    el('p', { class: 'maly slabe', text:
-      'Zóny a záznamy se dají spravovat už teď; samotné odpovídání na '
-      + 'portu 53 se zapne ve fázi 4.' })));
+      el('dt', { text: 'Ze zapamatovaných' }),
+      el('dd', { text: String(dnsStav.queries_cached ?? 0) }),
+      el('dt', { text: 'Neexistující jméno' }),
+      el('dd', { text: String(dnsStav.queries_nxdomain ?? 0) }),
+      el('dt', { text: 'Odmítnuto' }), el('dd', { text: String(dnsStav.queries_refused) }),
+      el('dt', { text: 'V paměti odpovědí' }), el('dd', { text: String(dnsStav.cache_entries) })),
+    dnsStav.running
+      ? el('p', { class: 'maly slabe', text:
+          'Vyzkoušej z jiného stroje: dig @<adresa serveru> dc01.<doména>' })
+      : el('div', { class: 'upozorneni warning' },
+          el('div', { class: 'text' },
+            el('div', { class: 'nazev', text: 'DNS server neposlouchá' }),
+            el('div', { class: 'detail', text:
+              'Nejčastěji je obsazený port 53 (systemd-resolved) nebo chybí '
+              + 'oprávnění na port pod 1024. Podrobnost je v logu serveru.' })))));
 
   nahrad(kontejner,
     el('h2', { class: 'nadpis-stranky', text: 'Správce DNS' }),

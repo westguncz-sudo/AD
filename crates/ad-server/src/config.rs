@@ -54,8 +54,15 @@ pub struct DomainApiConfig {
 #[serde(deny_unknown_fields)]
 pub struct DnsConfig {
     pub bind: SocketAddr,
-    /// Vlastní DNS server (plná funkce ve fázi 4).
+    /// Spustit vlastní DNS server.
     pub enabled: bool,
+    /// Přeposílat dotazy mimo naše zóny jen klientům z vnitřní sítě.
+    ///
+    /// Vypnout to znamená udělat z serveru otevřený přeposílač. Ten se
+    /// dá z internetu zneužít k zesílení útoku: útočník pošle malý
+    /// dotaz s podvrženou adresou oběti a velká odpověď letí na ni.
+    /// Nechávej zapnuté.
+    pub forward_only_local: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +88,11 @@ impl Default for DomainApiConfig {
 
 impl Default for DnsConfig {
     fn default() -> Self {
-        Self { bind: SocketAddr::from(([0, 0, 0, 0], proto::PORT_DNS)), enabled: true }
+        Self {
+            bind: SocketAddr::from(([0, 0, 0, 0], proto::PORT_DNS)),
+            enabled: true,
+            forward_only_local: true,
+        }
     }
 }
 

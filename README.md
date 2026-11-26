@@ -13,8 +13,8 @@ Kompatibilita se skutečným AD není cílem a nikde se nepředstírá.
 |---|---|---|
 | 1 | architektura, protokol, sdílené jádro `ad-core` | hotovo |
 | 2 | server: SQLite, doména, uživatelé, přihlášení, TLS | hotovo |
-| **3** | webová správa (dashboard, průvodci, nástroje) | **hotovo, k otestování** |
-| 4 | vlastní DNS server | čeká |
+| 3 | webová správa (dashboard, průvodci, nástroje) | hotovo |
+| **4** | vlastní DNS server | **hotovo, k otestování** |
 | 5 | klient a zásady | čeká |
 | 6 | služby: Windows Service, systemd, runit | čeká |
 | 7 | `index.html`, SHA-256, GitHub Actions | čeká |
@@ -49,6 +49,10 @@ crates/
     src/config.rs          konfigurace a cesty k datům
     src/pki.rs             vlastní CA a certifikát serveru (rcgen)
     src/domain.rs          kontrola předpokladů, povýšení, zrušení domény
+    src/dns/               vlastní DNS server (hickory-proto jen na pakety)
+      odpoved.rs           sestavení odpovědi ze zón — bez sítě, plně testovatelné
+      forward.rs           přeposílání dál + krátká paměť na odpovědi
+      mod.rs               poslouchání na UDP i TCP, počitadla
     src/store/             SQLite: schéma, objekty, přihlašování, zásady, DNS
     src/http/              axum: správní API, doménové API, CSRF, chyby
     web/                   webové rozhraní zabalené do binárky
@@ -63,6 +67,7 @@ crates/
 docs/
   test-faze2.sh            automatický test serveru (85 kontrol)
   test-faze3.sh            automatický test rozhraní v prohlížeči (76 kontrol)
+  test-faze4.sh            automatický test DNS serveru přes dig (41 kontrol)
 ```
 
 Proč jedno sdílené jádro: kdyby měl server a klient každý svoji kopii
@@ -105,6 +110,55 @@ target/x86_64-pc-windows-gnu/release/ad-client.exe
 
 Linuxové verze jsou staticky slinkované (`static-pie`), takže běží na
 Debianu i na Void Linuxu bez instalace knihoven.
+
+## Test fáze 4
+
+```bash
+cargo build -p ad-server
+sudo apt install bind9-dnsutils     # kvůli dig; na Void: xbps-install bind-utils
+bash docs/test-faze4.sh
+```
+
+Test si spustí server na portu 15353 (aby nepotřeboval oprávnění),
+vytvoří doménu a pak se ptá pomocí `dig`.
+
+### Ručně
+
+DNS server se spustí sám, jakmile je nainstalovaná role DNS. Port 53
+je pod 1024, takže potřebuje oprávnění:
+
+```bash
+# Debian: nejdřív uvolnit port 53 od systemd-resolved
+sudo systemctl disable --now systemd-resolved
+sudo rm -f /etc/resolv.conf && echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf
+
+# oprávnění na port pod 1024 bez spouštění pod rootem
+sudo setcap 'cap_net_bind_service=+ep' ./target/debug/ad-server
+
+cargo run -p ad-server -- --data-dir ./data run
+```
+
+Co zkusit (`<ip>` je adresa serveru, z klientské virtuálky):
+
+```bash
+dig @<ip> dc01.skola.internal A          # A záznam řadiče
+dig @<ip> -x 192.168.56.10               # reverzní překlad
+dig @<ip> _ad._tcp.skola.internal SRV    # podle tohohle si klient najde řadič
+dig @<ip> skola.internal SOA             # SOA zóny
+dig @<ip> neni.skola.internal A          # NXDOMAIN s SOA v authority
+dig @<ip> +tcp dc01.skola.internal A     # totéž přes TCP
+dig @<ip> seznam.cz A                    # přepošle se na forwarder
+```
+
+A co **nemá** projít:
+
+| Zkus | Co se stane | Proč |
+|---|---|---|
+| `dig @<ip> skola.internal AXFR` | odmítnuto | jinak si kdokoli stáhne seznam všech počítačů |
+| `dig @<ip> skola.internal ANY` | `REFUSED` | malý dotaz, velká odpověď = nástroj k zesílení útoku |
+| dotaz mimo zóny z veřejné adresy | `REFUSED` | otevřený přeposílač na internetu je zbraň |
+| dotaz mimo zóny bez forwarderu | `REFUSED` | není koho se zeptat |
+| `dig @<ip> ... +norecurse` na cizí jméno | `REFUSED` | nejsme autorita a tazatel rekurzi nechce |
 
 ## Test fáze 3
 

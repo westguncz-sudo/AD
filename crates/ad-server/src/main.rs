@@ -6,6 +6,7 @@
 //! * (od fáze 4) vlastní DNS server.
 
 mod config;
+mod dns;
 mod domain;
 mod http;
 mod pki;
@@ -201,13 +202,14 @@ async fn spust(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
         tracing::info!("vytvořen jednorázový token pro první přihlášení");
     }
 
-    let (restart_tls, prijem_restartu) = watch::channel(0u64);
+    let (signal_zmeny, prijem_zmeny) = watch::channel(0u64);
     let stav: http::Stav = Arc::new(http::AppState {
         store: store.clone(),
         cesty: cesty.clone(),
         config: konfigurace.clone(),
         start: std::time::Instant::now(),
-        restart_tls,
+        dns: Arc::new(dns::DnsStav::default()),
+        signal_zmeny,
     });
 
     let (vypni, prijem_vypnuti) = watch::channel(false);
@@ -234,14 +236,10 @@ async fn spust(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
 
     // --- doménové API (čeká na certifikát) ---
     let domenove =
-        tokio::spawn(domenove_api(stav.clone(), prijem_restartu, prijem_vypnuti.clone()));
+        tokio::spawn(domenove_api(stav.clone(), prijem_zmeny.clone(), prijem_vypnuti.clone()));
 
-    if konfigurace.dns.enabled {
-        tracing::info!(
-            adresa = %konfigurace.dns.bind,
-            "DNS server přijde ve fázi 4, teď neposlouchá"
-        );
-    }
+    // --- DNS server (čeká na nainstalovanou roli) ---
+    let dns_uloha = tokio::spawn(dns_sluzba(stav.clone(), prijem_zmeny, prijem_vypnuti.clone()));
 
     vypis_uvod(&store, &konfigurace)?;
 
@@ -252,6 +250,7 @@ async fn spust(cesty: Arc<Cesty>, konfigurace: Arc<Config>) -> Result<()> {
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), sprava).await;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), domenove).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), dns_uloha).await;
     tracing::info!("ad-server ukončen");
     Ok(())
 }
@@ -310,6 +309,71 @@ async fn domenove_api(
             return;
         }
         tracing::info!("doménové API se restartuje (změna certifikátu)");
+    }
+}
+
+/// DNS server běží, jen když je nainstalovaná role DNS a je povolený
+/// v konfiguraci. Po instalaci role nebo po zrušení domény se tahle
+/// úloha sama přestaví.
+async fn dns_sluzba(
+    stav: http::Stav,
+    mut zmena: watch::Receiver<u64>,
+    mut vypni: watch::Receiver<bool>,
+) {
+    loop {
+        let role_dns = {
+            let store = stav.store.clone();
+            tokio::task::spawn_blocking(move || store.role())
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .map(|r| r.dns)
+                .unwrap_or(false)
+        };
+
+        if !stav.config.dns.enabled || !role_dns {
+            if !stav.config.dns.enabled {
+                tracing::info!("DNS server je v konfiguraci vypnutý");
+            } else {
+                tracing::info!("DNS server čeká na nainstalování role DNS");
+            }
+            tokio::select! {
+                _ = zmena.changed() => continue,
+                _ = vypni.changed() => return,
+            }
+        }
+
+        let (stop, prijem_stopu) = watch::channel(false);
+        let mut uloha = tokio::spawn(dns::spust(
+            stav.store.clone(),
+            stav.dns.clone(),
+            stav.config.dns.bind,
+            stav.config.dns.forward_only_local,
+            prijem_stopu,
+        ));
+
+        let koncime = tokio::select! {
+            _ = zmena.changed() => false,
+            _ = vypni.changed() => true,
+            vysledek = &mut uloha => {
+                if let Ok(Err(e)) = vysledek {
+                    // Nejčastěji obsazený port 53 nebo chybějící
+                    // oprávnění. Server kvůli tomu nekončí — správa
+                    // i doménové API běží dál a je to vidět v přehledu.
+                    tracing::error!(chyba = %e.message, "DNS server se nespustil");
+                }
+                tokio::select! {
+                    _ = zmena.changed() => continue,
+                    _ = vypni.changed() => return,
+                }
+            }
+        };
+        let _ = stop.send(true);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), uloha).await;
+        if koncime {
+            return;
+        }
+        tracing::info!("DNS server se přestavuje (změna stavu serveru)");
     }
 }
 

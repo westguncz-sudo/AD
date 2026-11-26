@@ -21,6 +21,7 @@ rozhodnutí, ne jen kód.
 |---|---|---|
 | **uživatel ve školní síti** | zkoušet hesla, číst API | zamykání účtů, omezení rychlosti podle IP, oddělené správní rozhraní |
 | **odposlech v síti** | čte provoz | TLS 1.2+ na doménovém API; správa jen na loopbacku nebo SSH tunelem |
+| **kdokoli v síti (DNS)** | ptát se, stáhnout zónu, zneužít k zesílení útoku | zákaz AXFR a ANY, přeposílání jen pro vnitřní síť, zkracování odpovědí |
 | **podvržený server (MITM)** | vydávat se za řadič | připnutý otisk CA, ověřený člověkem při připojení |
 | **podvržený klient** | hlásit se cizím jménem, zapsat cizí IP do DNS | tajemství počítače, server bere skutečnou IP spojení |
 | **škodlivá webová stránka** | poslat požadavek do naší správy z prohlížeče správce | CSRF token v hlavičce, kontrola `Origin`, `SameSite=Strict`, poslouchá jen loopback |
@@ -159,6 +160,41 @@ cizí text a kdyby se vložil jako HTML, stačilo by připojit počítač se
 jménem systému `<img onerror=…>` a skript by běžel v prohlížeči správce.
 Zákaz `innerHTML` hlídá pravidlo v `eslint.config.mjs`.
 
+### DNS: server, který je vidět z celé sítě
+
+DNS je jediná naše služba, na kterou se smí ozvat kdokoli bez hesla.
+Proto má vlastní sadu opatření:
+
+**Zesílení útoku (amplification).** Útočník pošle malý dotaz
+s podvrženou zdrojovou adresou oběti a velká odpověď letí na ni. Proti
+tomu: dotaz `ANY` odmítáme úplně, dotazy mimo naše zóny vyřizujeme jen
+klientům z vnitřních sítí (loopback, 10/8, 172.16/12, 192.168/16,
+169.254/16, ULA a link-local u IPv6), a odpověď přes UDP se vejde do
+512 bajtů, nebo se zkrátí s příznakem `tc` a tazatel se musí zeptat
+znovu přes TCP — což podvrženou adresu odhalí.
+
+**Stažení seznamu počítačů.** Přenos zóny (`AXFR`, `IXFR`) odmítáme.
+Jinak by si kdokoli v síti stáhl jména a adresy všech strojů naráz.
+
+**Podvržení odpovědi od forwarderu.** Když se ptáme nadřazeného
+serveru, přijatou odpověď přijmeme jen tehdy, když přišla od adresy,
+které jsme se ptali, má naše náhodné číslo dotazu a **tutéž otázku**.
+Číslo dotazu se bere z generátoru operačního systému, ne z počitadla.
+
+**Otrava paměti odpovědí.** Pamatujeme si jen odpovědi `NOERROR`
+a `NXDOMAIN`, nejdéle hodinu a nejkratší dobu 10 sekund. Při výdeji se
+od TTL odečte, jak dlouho už odpověď leží — jinak bychom tvrdili, že
+platí déle, než doopravdy platí. Paměť má strop 2000 položek, takže
+nejde nafouknout.
+
+**Nekonečná smyčka v CNAME.** Řetěz CNAME následujeme nejvýš osmkrát,
+pak vrátíme `SERVFAIL`.
+
+Co **neumíme** a neděláme, že umíme: DNSSEC. Nepodepisujeme ani
+neověřujeme podpisy. Klient se tedy musí spolehnout na to, že síť mezi
+ním a řadičem je důvěryhodná — a proto se doménové API ověřuje
+připnutým otiskem certifikátu, ne jménem z DNS.
+
 ### SQL
 
 Všechny dotazy jsou parametrizované (`rusqlite` `?1`, `?2`). Jména se
@@ -217,4 +253,6 @@ Jméno domény `.local` je zakázané úplně, protože koliduje s mDNS
 - [ ] `ad-client leave` vrátí `/etc/resolv.conf` do původního stavu
 - [ ] zásada s neznámým polem se odmítne
 - [ ] tapeta s rozbitým součtem se zahodí
+- [ ] `dig @server skola.internal AXFR` selže
+- [ ] `dig @server skola.internal ANY` vrátí `REFUSED`
 - [ ] odinstalace nenechá na stroji nic kromě logů

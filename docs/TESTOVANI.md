@@ -83,7 +83,7 @@ ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
 |---|---|
 | 2 | `curl` proti `/api/v1/hello`, vytvoření domény, přihlášení, restart serveru a kontrola, že data zůstala |
 | 3 | `bash docs/test-faze3.sh`, nebo ručně v prohlížeči: přehled → role → povýšení → nástroje |
-| 4 | `dig @192.168.56.10 dc01.skola.internal`, `dig -x 192.168.56.10`, `dig _ad._tcp.skola.internal SRV`, `dig seznam.cz` (forwarder) |
+| 4 | `bash docs/test-faze4.sh`, nebo z klientské virtuálky: `dig @192.168.56.10 dc01.skola.internal`, `dig @192.168.56.10 -x 192.168.56.10`, `dig @192.168.56.10 _ad._tcp.skola.internal SRV`, `dig @192.168.56.10 seznam.cz` |
 | 5 | `ad-client join` na obou klientech, přihlášení uživatele, změna zásady a její dopad, `ad-client leave` a kontrola, že `/etc/resolv.conf` je zpátky |
 | 6 | restart virtuálky — služba se spustí sama; `systemctl status`, `sv status`, `Get-Service` |
 | 7 | stáhnout z `index.html`, ověřit SHA-256, spustit |
@@ -93,6 +93,13 @@ ssh -L 8080:127.0.0.1:8080 uzivatel@192.168.56.10
 ```bash
 # co poslouchá na portech
 sudo ss -tulpn | grep -E ':(53|8080|8443)'
+
+# na Debianu port 53 nejdřív uvolnit od systemd-resolved
+sudo systemctl disable --now systemd-resolved
+sudo rm -f /etc/resolv.conf && echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf
+
+# oprávnění na port pod 1024 bez spouštění pod rootem
+sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/ad-server
 
 # sleduj log serveru
 sudo journalctl -u ad-server -f          # Debian

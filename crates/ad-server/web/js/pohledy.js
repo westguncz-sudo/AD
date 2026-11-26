@@ -102,7 +102,6 @@ export async function prehled(kontejner) {
     radky: [
       ['Role', s.roles.dns ? 'nainstalovaná' : 'není'],
       ['Zóny', s.counts.zones],
-      ['Server na portu 53', 've fázi 4'],
     ],
     cesta: s.roles.dns ? '/dns' : '/role',
   }));

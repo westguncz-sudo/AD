@@ -120,24 +120,33 @@ pub struct AdminHello {
 // =======================================================================
 
 async fn dns_stav(State(stav): State<Stav>, _s: Spravce) -> Odpoved<Json<DnsStatusResponse>> {
+    use std::sync::atomic::Ordering;
     let store = stav.store.clone();
     let cfg = stav.config.clone();
+    let dns = stav.dns.clone();
     Ok(Json(
         blok(move || {
             let puvodni: Vec<String> = store
                 .nastaveni(crate::store::schema::nastaveni::DNS_ORIGINAL)?
                 .and_then(|j| serde_json::from_str(&j).ok())
                 .unwrap_or_default();
+            let naslouchani = dns.naslouchani();
             Ok(DnsStatusResponse {
-                // Vlastní DNS server přijde ve fázi 4.
-                running: false,
-                listen: vec![cfg.dns.bind.to_string()],
+                running: dns.bezi.load(Ordering::Relaxed),
+                listen: if naslouchani.is_empty() {
+                    vec![cfg.dns.bind.to_string()]
+                } else {
+                    naslouchani
+                },
                 forwarders: store.forwardery()?,
                 original_forwarders: puvodni,
-                queries_total: 0,
-                queries_forwarded: 0,
-                queries_refused: 0,
-                cache_entries: 0,
+                queries_total: dns.dotazy.load(Ordering::Relaxed),
+                queries_authoritative: dns.autoritativni.load(Ordering::Relaxed),
+                queries_forwarded: dns.preposlane.load(Ordering::Relaxed),
+                queries_cached: dns.z_cache.load(Ordering::Relaxed),
+                queries_refused: dns.odmitnute.load(Ordering::Relaxed),
+                queries_nxdomain: dns.nxdomain.load(Ordering::Relaxed),
+                cache_entries: dns.preposilac.pocet_v_cache(),
             })
         })
         .await?,
@@ -164,6 +173,8 @@ async fn nastav_forwardery(
         store.zapis_audit("dns.forwarders", &jmeno, "", &ip_text, true, &seznam.join(", "))
     })
     .await?;
+    // Zapamatované odpovědi mohly přijít od starého serveru.
+    stav.dns.preposilac.vycisti();
     Ok(Json(req))
 }
 
@@ -572,6 +583,8 @@ async fn nainstaluj_role(
         store.role()
     })
     .await?;
+    // Nainstalovaná role DNS znamená, že se má spustit DNS server.
+    stav.signal_zmeny.send_modify(|v| *v += 1);
     Ok(Json(role))
 }
 
@@ -580,9 +593,11 @@ async fn precheck(
     _s: Spravce,
     Telo(req): Telo<PromoteRequest>,
 ) -> Odpoved<Json<PrecheckResponse>> {
+    use std::sync::atomic::Ordering;
     let store = stav.store.clone();
     let cesty = stav.cesty.clone();
-    Ok(Json(blok(move || crate::domain::precheck(&store, &cesty, &req)).await?))
+    let dns_bezi = stav.dns.bezi.load(Ordering::Relaxed);
+    Ok(Json(blok(move || crate::domain::precheck(&store, &cesty, &req, dns_bezi)).await?))
 }
 
 async fn povys(
@@ -595,11 +610,13 @@ async fn povys(
     let cesty = stav.cesty.clone();
     let jmeno = spravce.jmeno();
     let ip_text = ip.text();
+    let dns_bezi = stav.dns.bezi.load(std::sync::atomic::Ordering::Relaxed);
     let odpoved =
-        blok(move || crate::domain::promote(&store, &cesty, &req, &jmeno, &ip_text)).await?;
+        blok(move || crate::domain::promote(&store, &cesty, &req, dns_bezi, &jmeno, &ip_text))
+            .await?;
 
     // Teď existuje certifikát → nastartujeme doménové API.
-    stav.restart_tls.send_modify(|v| *v += 1);
+    stav.signal_zmeny.send_modify(|v| *v += 1);
     tracing::info!(domena = %odpoved.domain.dns_name, "doména vytvořena");
     Ok(Json(odpoved))
 }
@@ -626,7 +643,7 @@ async fn zrus_domenu(
         )
     })
     .await?;
-    stav.restart_tls.send_modify(|v| *v += 1);
+    stav.signal_zmeny.send_modify(|v| *v += 1);
     Ok(Json(Ok2::default()))
 }
 

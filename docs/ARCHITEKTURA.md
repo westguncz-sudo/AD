@@ -258,16 +258,27 @@ správce ho zadá klientovi (`ad-client join --fingerprint ...`).
 
 ## 7. DNS
 
-Vlastní server postavený na `hickory-proto` (parsování a skládání
-paketů). Odpovídání, zóny i forwarder jsou náš kód.
+Vlastní server postavený na `hickory-proto` (skládání a rozebírání
+paketů). Odpovídání, zóny, přeposílání i paměť odpovědí jsou náš kód.
 
 ```
 dotaz ──► patří do našich zón?
             ├── ano ──► odpověď z SQLite (A, AAAA, PTR, SRV, TXT, NS, MX, SOA)
-            │           nic nenalezeno → NXDOMAIN s naším SOA
-            └── ne ───► je forwarder? ──► ano: přepošli, výsledek do cache
-                                      └── ne: REFUSED
+            │           CNAME se následuje uvnitř zóny
+            │           jméno není     → NXDOMAIN + SOA v authority
+            │           jméno bez typu → NOERROR bez odpovědi + SOA
+            └── ne ───► smí ten klient přeposílat? ──► ne: REFUSED
+                        je forwarder?               ──► ne: REFUSED
+                        ano ──► přepošli, výsledek si chvíli pamatuj
 ```
+
+Rozdělení kódu:
+
+| Soubor | Co dělá |
+|---|---|
+| `dns/odpoved.rs` | sestaví odpověď ze zón; **nesahá na síť**, proto se dá celý otestovat |
+| `dns/forward.rs` | přeposílání na nadřazený server, paměť odpovědí, kontrola vnitřní sítě |
+| `dns/mod.rs` | poslouchání na UDP i TCP, odmítání, zkracování odpovědí, počitadla |
 
 Při vytvoření domény `skola.internal` se založí:
 
@@ -279,13 +290,35 @@ Při vytvoření domény `skola.internal` se založí:
 | | `_ad._tcp SRV` | `0 100 8443 dc01.skola.internal` |
 | `56.168.192.in-addr.arpa` | `10 PTR` | `dc01.skola.internal` |
 
-Forwarder se předvyplní tím, co měl systém nastavené **před** námi
-(`/etc/resolv.conf`, resp. Windows DNS klient). Klient při připojení
-k domény udělá to samé na své straně: zálohuje a nastaví sebe na náš
-server. Při odpojení se vrátí záloha.
+SRV záznam `_ad._tcp` není kosmetika — klient, který zná jen jméno
+domény, si jím najde adresu a port řadiče. Při připojení počítače do
+domény přibude jeho `A` a `PTR` záznam; při odpojení zase zmizí.
 
-SRV záznam `_ad._tcp` není kosmetika — klient, který zná jen jméno domény,
-si jím najde adresu a port řadiče.
+Forwarder se předvyplní tím, co měl systém nastavené **před** námi
+(`/etc/resolv.conf`). Klient při připojení udělá totéž na své straně:
+zálohuje a nastaví se na náš server, při odpojení zálohu vrátí.
+
+### Co server záměrně nedělá
+
+| | Proč |
+|---|---|
+| nepřenáší zóny (AXFR/IXFR) | jinak si kdokoli stáhne seznam všech počítačů v síti |
+| neodpovídá na dotaz `ANY` | malá otázka, velká odpověď — nástroj k zesílení útoku |
+| nepřeposílá pro veřejné adresy | otevřený přeposílač na internetu je zbraň, ne služba |
+| neumí rekurzi sám | kořenové servery a DNSSEC do školního projektu nepatří a nepředstíráme to |
+| neřeší DNSSEC | totéž — radši nic než něco, co vypadá jako podpis |
+
+Zapnout přeposílání i pro veřejné adresy jde v konfiguraci
+(`[dns] forward_only_local = false`), ale je to vědomé rozhodnutí
+a výchozí stav to není.
+
+### Port 53 a oprávnění
+
+Port pod 1024 potřebuje na Linuxu oprávnění. Neřešíme to spouštěním pod
+rootem, ale schopností `CAP_NET_BIND_SERVICE` (v jednotce systemd,
+u Void přes `setcap` v instalačním skriptu). Když se na port navázat
+nepovede, DNS server se nespustí, ale **zbytek serveru běží dál** —
+správa i doménové API fungují a v přehledu je vidět, že DNS neposlouchá.
 
 ## 8. Cesta zásad od správce ke klientovi
 
@@ -352,7 +385,7 @@ musl je potřeba `musl-gcc` a pro Windows mingw. Oboje už máme vyzkoušené.
 | 1 | architektura, protokol, `ad-core` | `cargo test`, `--version`, oba cíle |
 | **2** | SQLite, povýšení, uživatelé, přihlášení, TLS | `bash docs/test-faze2.sh` |
 | 3 | webová správa (dashboard, průvodci, nástroje) | prohlížeč na 127.0.0.1 |
-| 4 | DNS server, zóny, forwarder | `dig @server`, `nslookup` |
+| **4** | DNS server, zóny, forwarder | `bash docs/test-faze4.sh` |
 | 5 | klient: join, logon, zásady, leave | dvě virtuálky |
 | 6 | Windows Service, systemd, runit | restart virtuálky |
 | 7 | `index.html`, SHA-256, GitHub Actions | stáhnout a spustit |

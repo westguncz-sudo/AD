@@ -46,7 +46,17 @@ fn chyba(code: &str, title: &str, detail: impl Into<String>, rada: &str) -> Chec
 }
 
 /// Zkontroluje předpoklady povýšení. Nic nemění.
-pub fn precheck(store: &Store, cesty: &Cesty, req: &PromoteRequest) -> Result<PrecheckResponse> {
+///
+/// `dns_bezi` říká, jestli už poslouchá **náš** DNS server. Bez toho
+/// by kontrola portu 53 hlásila konflikt sama se sebou: role DNS se
+/// instaluje dřív než se vytvoří doména, takže v době kontroly už náš
+/// server na portu je.
+pub fn precheck(
+    store: &Store,
+    cesty: &Cesty,
+    req: &PromoteRequest,
+    dns_bezi: bool,
+) -> Result<PrecheckResponse> {
     let mut items = Vec::new();
 
     // --- doména ještě neexistuje ---
@@ -175,14 +185,15 @@ pub fn precheck(store: &Store, cesty: &Cesty, req: &PromoteRequest) -> Result<Pr
 
     // --- porty ---
     if role.dns && req.dns.enable_server {
-        let port = 53;
-        if port_volny(port) {
+        if dns_bezi {
+            items.push(ok("dns_port_free", "Port pro DNS", "Náš DNS server už na něm poslouchá."));
+        } else if port_volny(53) {
             items.push(ok("dns_port_free", "Port 53 pro DNS", "Je volný."));
         } else {
             items.push(chyba(
                 "dns_port_free",
                 "Port 53 pro DNS",
-                "Na portu 53 už něco poslouchá.",
+                "Na portu 53 už něco poslouchá a není to náš server.",
                 "Vypni systemd-resolved nebo jiný DNS server \
                  (sudo systemctl disable --now systemd-resolved).",
             ));
@@ -290,13 +301,14 @@ pub fn promote(
     store: &Store,
     cesty: &Cesty,
     req: &PromoteRequest,
+    dns_bezi: bool,
     actor: &str,
     ip: &str,
 ) -> Result<PromoteResponse> {
     if !req.confirm {
         return Err(AdError::bad_request("chybí potvrzení (confirm), doména se nevytvoří omylem"));
     }
-    let kontrola = precheck(store, cesty, req)?;
+    let kontrola = precheck(store, cesty, req, dns_bezi)?;
     if !kontrola.can_continue {
         let nesplnene: Vec<&CheckItem> =
             kontrola.items.iter().filter(|i| i.status == CheckStatus::Fail).collect();
@@ -773,7 +785,7 @@ mod tests {
     #[test]
     fn precheck_bez_roli_neprojde() {
         let (store, cesty, _u) = prostredi();
-        let v = precheck(&store, &cesty, &pozadavek()).unwrap();
+        let v = precheck(&store, &cesty, &pozadavek(), false).unwrap();
         assert!(!v.can_continue, "bez role doménových služeb to nesmí projít");
         assert!(v
             .items
@@ -786,7 +798,7 @@ mod tests {
         let (store, cesty, _u) = prostredi();
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
         store.nastav_bool(nastaveni::ROLE_DNS, true).unwrap();
-        let v = precheck(&store, &cesty, &pozadavek()).unwrap();
+        let v = precheck(&store, &cesty, &pozadavek(), false).unwrap();
         assert!(
             v.can_continue,
             "{:#?}",
@@ -801,7 +813,7 @@ mod tests {
         let mut req = pozadavek();
         req.domain_dns_name = "skola.local".into();
         req.administrator_password = secret::Tajne::new("heslo");
-        let v = precheck(&store, &cesty, &req).unwrap();
+        let v = precheck(&store, &cesty, &req, false).unwrap();
         assert!(!v.can_continue);
         assert!(v.items.iter().any(|i| i.code == "domain_name" && i.status == CheckStatus::Fail));
         assert!(v
@@ -815,7 +827,7 @@ mod tests {
         let (store, cesty, _u) = prostredi();
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
         store.nastav_bool(nastaveni::ROLE_DNS, true).unwrap();
-        let odpoved = promote(&store, &cesty, &pozadavek(), "setup-token", "127.0.0.1").unwrap();
+        let odpoved = promote(&store, &cesty, &pozadavek(), false, "setup-token", "127.0.0.1").unwrap();
 
         assert_eq!(odpoved.domain.dns_name, "skola.internal");
         assert_eq!(odpoved.domain.short_name, "SKOLA");
@@ -839,7 +851,7 @@ mod tests {
         assert_eq!(pki::otisk_ca(&cesty.pki()).unwrap(), odpoved.ca_fingerprint_sha256);
 
         // Druhé povýšení už nesmí projít.
-        let e = promote(&store, &cesty, &pozadavek(), "x", "127.0.0.1").unwrap_err();
+        let e = promote(&store, &cesty, &pozadavek(), false, "x", "127.0.0.1").unwrap_err();
         assert_eq!(e.code, ErrorCode::PrerequisiteFailed);
     }
 
@@ -849,14 +861,14 @@ mod tests {
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
         let mut req = pozadavek();
         req.confirm = false;
-        assert!(promote(&store, &cesty, &req, "x", "127.0.0.1").is_err());
+        assert!(promote(&store, &cesty, &req, false, "x", "127.0.0.1").is_err());
     }
 
     #[test]
     fn prihlaseni_spravce_po_povyseni() {
         let (store, cesty, _u) = prostredi();
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
-        promote(&store, &cesty, &pozadavek(), "setup-token", "127.0.0.1").unwrap();
+        promote(&store, &cesty, &pozadavek(), false, "setup-token", "127.0.0.1").unwrap();
 
         let u = store.over_spravce("administrator", "Spravce-Heslo1", "127.0.0.1").unwrap();
         assert_eq!(u.sam_account_name, "administrator");
@@ -877,7 +889,7 @@ mod tests {
         let (store, cesty, _u) = prostredi();
         store.nastav_bool(nastaveni::ROLE_DIRECTORY, true).unwrap();
         store.nastav_bool(nastaveni::ROLE_DNS, true).unwrap();
-        promote(&store, &cesty, &pozadavek(), "setup", "127.0.0.1").unwrap();
+        promote(&store, &cesty, &pozadavek(), false, "setup", "127.0.0.1").unwrap();
 
         // Špatné jméno pro potvrzení nic nesmaže.
         assert!(demote(&store, &cesty, "jina.internal", false, "x", "127.0.0.1").is_err());

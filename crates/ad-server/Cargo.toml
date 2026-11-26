@@ -16,6 +16,7 @@ workspace = true
 ad-core = { version = "0.1.0", path = "../ad-core" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query", "tower-log"] }
 hex = "0.4.3"
+hickory-proto = { version = "0.25.2", default-features = false, features = ["std"] }
 hyper = { version = "1.13.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio", "server", "server-graceful", "http1"] }
 rcgen = "0.14.7"
@@ -25,7 +26,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "l
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 time = { version = "0.3.44", features = ["formatting", "parsing", "macros"] }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "macros", "signal", "time", "fs"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "macros", "signal", "time", "fs", "io-util"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
 toml = "1.0.7"
 tower = { version = "0.5.3", features = ["util"] }

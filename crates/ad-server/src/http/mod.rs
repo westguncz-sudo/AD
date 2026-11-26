@@ -30,9 +30,12 @@ pub struct AppState {
     pub cesty: Arc<Cesty>,
     pub config: Arc<Config>,
     pub start: std::time::Instant,
-    /// Zvýšením čísla se restartuje poslouchátko doménového API —
-    /// potřebujeme to po povýšení, kdy vznikne certifikát.
-    pub restart_tls: watch::Sender<u64>,
+    /// Počitadla a stav DNS serveru.
+    pub dns: Arc<crate::dns::DnsStav>,
+    /// Zvýšením čísla se přestaví poslouchátka, která závisí na stavu
+    /// serveru: doménové API (potřebuje certifikát z povýšení) a DNS
+    /// server (potřebuje nainstalovanou roli).
+    pub signal_zmeny: watch::Sender<u64>,
 }
 
 pub type Stav = Arc<AppState>;

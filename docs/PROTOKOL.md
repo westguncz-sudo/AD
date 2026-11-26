@@ -331,7 +331,7 @@ upozornění.
 | `/gpos/{id}/links` | GET, POST, DELETE |
 | `/gpos/effective?ou_id=` | GET — výsledná sada zásad |
 | `/assets` | POST — nahrání tapety |
-| `/dns/status` | GET |
+| `/dns/status` | GET — běží/neběží, adresy, forwardery, počitadla |
 | `/dns/zones`, `/dns/zones/{id}` | GET, POST, DELETE |
 | `/dns/zones/{id}/records` | GET, POST |
 | `/dns/zones/{id}/records/{rid}` | PATCH, DELETE |
@@ -369,7 +369,7 @@ Stav po fázi 2 — co je hotové a co ještě ne:
 | správní API: OU, uživatelé, skupiny, počítače, zásady, DNS data | hotovo |
 | nahrání tapety (`POST /assets`) | fáze 5 |
 | webové rozhraní nad tím | hotovo |
-| vlastní DNS server na portu 53 | fáze 4 |
+| vlastní DNS server na portu 53 | hotovo |
 
 ## 7. Příklady na vyzkoušení
 
